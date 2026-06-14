@@ -4,8 +4,17 @@ from typing import List, Dict, Any
 import json
 
 # Configure Gemini AI
-genai.configure(api_key=settings.gemini_api_key)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+if not settings.gemini_api_key:
+    print("WARNING: GEMINI_API_KEY is not set in .env file. Gemini features will not work.")
+    model = None
+else:
+    try:
+        genai.configure(api_key=settings.gemini_api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        print(f"Gemini AI configured successfully (API key length: {len(settings.gemini_api_key)})")
+    except Exception as e:
+        print(f"Error configuring Gemini AI: {e}")
+        model = None
 
 # Fallback responses when Gemini API is not available
 def get_fallback_response(user_message: str) -> str:
@@ -105,6 +114,9 @@ class GeminiService:
     @staticmethod
     async def generate_response(user_message: str, patient_context: Dict[str, Any] = None) -> str:
         """Generate a response using Gemini AI."""
+        if model is None:
+            return get_enhanced_fallback_response(user_message, patient_context)
+        
         try:
             # Add patient context if available
             context = ""
@@ -130,6 +142,9 @@ class GeminiService:
     @staticmethod
     async def generate_suggestions(user_message: str) -> List[str]:
         """Generate follow-up suggestions based on user input."""
+        if model is None:
+            return get_fallback_suggestions(user_message)
+        
         try:
             prompt = f"""Based on this user message: "{user_message}", suggest 2-3 helpful follow-up questions or actions a healthcare assistant might offer. Keep them short and relevant. Return only the suggestions, one per line."""
             

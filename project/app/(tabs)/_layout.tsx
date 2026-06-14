@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Chrome as Home, FileText, Calendar, User, Bot } from 'lucide-react-native';
+import { Chrome as Home, FileText, Calendar, User, Bot, ScanLine } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
@@ -7,7 +7,7 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          display: 'none', // Hide bottom navigation since we're using top navigation
+          display: 'none',
         },
       }}>
       <Tabs.Screen
@@ -43,6 +43,15 @@ export default function TabLayout() {
           title: 'AI Assistant',
           tabBarIcon: ({ size, color }) => (
             <Bot size={size} color={color} strokeWidth={2} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="meal-analyzer"
+        options={{
+          title: 'GlucoScan',
+          tabBarIcon: ({ size, color }) => (
+            <ScanLine size={size} color={color} strokeWidth={2} />
           ),
         }}
       />

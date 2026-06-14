@@ -22,8 +22,8 @@ export default function MedicationRefillScreen() {
   const router = useRouter();
 
   const handleMedicationSelect = (medicationId: number) => {
-    setSelectedMedications(prev => 
-      prev.includes(medicationId) 
+    setSelectedMedications(prev =>
+      prev.includes(medicationId)
         ? prev.filter(id => id !== medicationId)
         : [...prev, medicationId]
     );
@@ -36,17 +36,17 @@ export default function MedicationRefillScreen() {
     }
 
     setIsSubmitting(true);
-    
+
     // Simulate API call
     setTimeout(() => {
       setIsSubmitting(false);
       Alert.alert(
-        'Request Submitted', 
-        `Refill request submitted for ${selectedMedications.length} medication(s). You will receive a confirmation within 24 hours.`,
+        'Success',
+        'The request has been sent.',
         [
           {
             text: 'OK',
-            onPress: () => router.back()
+            onPress: () => router.push('/(tabs)')
           }
         ]
       );
@@ -70,7 +70,7 @@ export default function MedicationRefillScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
           >

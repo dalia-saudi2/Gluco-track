@@ -1,0 +1,97 @@
+{
+  "before": {
+    "accuracy": 0.780491899605473,
+    "f1": 0.761121768521056,
+    "roc_auc": 0.8588252011290223,
+    "threshold": 0.5,
+    "confusion_matrix": [
+      [
+        5132,
+        1055
+      ],
+      [
+        1560,
+        4166
+      ]
+    ],
+    "features": 39
+  },
+  "after": {
+    "accuracy": 0.7861160077226559,
+    "f1": 0.7687840290381125,
+    "roc_auc": 0.8635075652694423,
+    "threshold": 0.5000000000000001,
+    "confusion_matrix": [
+      [
+        5129,
+        1058
+      ],
+      [
+        1490,
+        4236
+      ]
+    ],
+    "features": 60,
+    "best_params": {
+      "n_estimators": 300,
+      "max_depth": 7,
+      "learning_rate": 0.03,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "min_child_weight": 1,
+      "gamma": 0.0,
+      "reg_lambda": 1.0,
+      "reg_alpha": 0.0
+    },
+    "top_features": [
+      [
+        "glucose_roc_5",
+        0.2463236153125763
+      ],
+      [
+        "glucose_mean_60",
+        0.04329695552587509
+      ],
+      [
+        "roc_mean",
+        0.03797046095132828
+      ],
+      [
+        "glucose_delta_15",
+        0.029758090153336525
+      ],
+      [
+        "glucose_max_60",
+        0.026029864326119423
+      ],
+      [
+        "time_since_meal",
+        0.02143140509724617
+      ],
+      [
+        "in_hyperglycemia",
+        0.021034298464655876
+      ],
+      [
+        "carbs_sum_60",
+        0.020733995363116264
+      ],
+      [
+        "time_since_bolus",
+        0.020385993644595146
+      ],
+      [
+        "glucose_delta_30",
+        0.020047031342983246
+      ],
+      [
+        "glucose_roc_30",
+        0.019455883651971817
+      ],
+      [
+        "patient_id",
+        0.019003551453351974
+      ]
+    ]
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "before": {
+    "accuracy": 0.740133652755012,
+    "f1": 0.6052480367745643,
+    "roc_auc": 0.7998136770338244,
+    "threshold": 0.5,
+    "confusion_matrix": [
+      [
+        8580,
+        1287
+      ],
+      [
+        2835,
+        3160
+      ]
+    ],
+    "features": 25
+  },
+  "after": {
+    "accuracy": 0.744168452906317,
+    "f1": 0.6178187982670936,
+    "roc_auc": 0.803116393826043,
+    "threshold": 0.4900000000000001,
+    "confusion_matrix": [
+      [
+        8524,
+        1343
+      ],
+      [
+        2715,
+        3280
+      ]
+    ],
+    "features": 33,
+    "best_params": {
+      "n_estimators": 300,
+      "max_depth": 6,
+      "learning_rate": 0.03,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "min_child_weight": 1,
+      "gamma": 0.0,
+      "reg_lambda": 1.0,
+      "reg_alpha": 0.0
+    },
+    "top_features": [
+      [
+        "glucose_roc_5",
+        0.2549770176410675
+      ],
+      [
+        "roc_mean",
+        0.13534313440322876
+      ],
+      [
+        "glucose_roc_15",
+        0.03804341331124306
+      ],
+      [
+        "glucose_min_60",
+        0.03711128234863281
+      ],
+      [
+        "carb_insulin_ratio",
+        0.03223353996872902
+      ],
+      [
+        "time_since_meal",
+        0.03152257949113846
+      ],
+      [
+        "glucose_mean_60",
+        0.027086494490504265
+      ],
+      [
+        "glucose_x_bolus",
+        0.02312450110912323
+      ],
+      [
+        "glucose_roc_30",
+        0.02308698743581772
+      ],
+      [
+        "glucose_max_60",
+        0.023016279563307762
+      ],
+      [
+        "glucose_delta_30",
+        0.022547895088791847
+      ],
+      [
+        "time_since_bolus",
+        0.02249283716082573
+      ]
+    ]
+  }
+}

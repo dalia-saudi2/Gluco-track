@@ -3,7 +3,13 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
+# =================================================================
+# DATABASE MODELS
+# =================================================================
+# These classes define the structure of your database tables
+# using SQLAlchemy ORM.
 class User(Base):
+    """Stores core patient profile information and account credentials."""
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -15,18 +21,34 @@ class User(Base):
     phone = Column(String)
     date_of_birth = Column(DateTime)
     blood_type = Column(String)
+    bmi = Column(String)
+    blood_pressure = Column(String)
     emergency_contact = Column(String)
+    address = Column(String)
+    gender = Column(String)
+    age = Column(Integer, nullable=True)
+    ethnicity = Column(String, nullable=True)
+    education_level = Column(String, nullable=True)
+    employment_status = Column(String, nullable=True)
+    income_level = Column(String, nullable=True)
+    onboarding_completed = Column(Boolean, default=False)
+    onboarding_lab_opt_in = Column(Boolean, nullable=True)
+    # Personalized insulin therapy parameters (mg/dL per unit; grams carb per unit)
+    isf_mg_dl_per_unit = Column(Float, nullable=True)
+    icr_grams_per_unit = Column(Float, nullable=True)
+    dexcom_refresh_token_enc = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationships
+    # Relationships: Links this user to their related data in other tables
     appointments = relationship("Appointment", back_populates="patient")
     medical_records = relationship("MedicalRecord", back_populates="patient")
     medications = relationship("Medication", back_populates="patient")
     messages = relationship("Message", back_populates="patient")
 
 class Appointment(Base):
+    """Stores scheduled medical visits between patients and doctors."""
     __tablename__ = "appointments"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -45,6 +67,7 @@ class Appointment(Base):
     patient = relationship("User", back_populates="appointments")
 
 class MedicalRecord(Base):
+    """Stores clinical data including lab results, imaging reports, and summaries."""
     __tablename__ = "medical_records"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -65,6 +88,7 @@ class MedicalRecord(Base):
     patient = relationship("User", back_populates="medical_records")
 
 class Medication(Base):
+    """Tracks active and historical medications prescribed to the patient."""
     __tablename__ = "medications"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -85,6 +109,7 @@ class Medication(Base):
     patient = relationship("User", back_populates="medications")
 
 class Message(Base):
+    """Stores communications between patients and the clinic/doctors."""
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, index=True)

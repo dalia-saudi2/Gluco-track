@@ -28,7 +28,20 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     date_of_birth: Optional[datetime] = None
     blood_type: Optional[str] = None
+    bmi: Optional[str] = None
+    blood_pressure: Optional[str] = None
     emergency_contact: Optional[str] = None
+    address: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    ethnicity: Optional[str] = None
+    education_level: Optional[str] = None
+    employment_status: Optional[str] = None
+    income_level: Optional[str] = None
+    onboarding_completed: Optional[bool] = False
+    onboarding_lab_opt_in: Optional[bool] = None
+    isf_mg_dl_per_unit: Optional[float] = None
+    icr_grams_per_unit: Optional[float] = None
     # OAuth fields (read-only in responses)
     google_id: Optional[str] = None
     google_picture: Optional[str] = None
@@ -42,6 +55,94 @@ class UserUpdate(BaseModel):
     date_of_birth: Optional[datetime] = None
     blood_type: Optional[str] = None
     emergency_contact: Optional[str] = None
+    address: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    ethnicity: Optional[str] = None
+    education_level: Optional[str] = None
+    employment_status: Optional[str] = None
+    income_level: Optional[str] = None
+    onboarding_completed: Optional[bool] = None
+
+
+class OnboardingDemographicsUpdate(BaseModel):
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    ethnicity: Optional[str] = None
+    education_level: Optional[str] = None
+    employment_status: Optional[str] = None
+    income_level: Optional[str] = None
+    onboarding_completed: Optional[bool] = None
+
+
+class OnboardingLabChoiceUpdate(BaseModel):
+    onboarding_lab_opt_in: bool
+    onboarding_completed: Optional[bool] = None
+
+
+class OnboardingCompleteUpdate(BaseModel):
+    onboarding_completed: bool = True
+
+
+class DiabetesSettingsUpdate(BaseModel):
+    """Insulin sensitivity factor (ISF): mg/dL drop per 1 unit rapid insulin.
+    Carb ratio (ICR): grams of carbohydrate covered by 1 unit bolus."""
+    isf_mg_dl_per_unit: Optional[float] = None
+    icr_grams_per_unit: Optional[float] = None
+
+
+class USDAFoodSearchHit(BaseModel):
+    fdc_id: int
+    description: str
+
+
+class USDAFoodNutrients(BaseModel):
+    fdc_id: int
+    description: str
+    carbs_g_per_100g: Optional[float] = None
+    energy_kcal_per_100g: Optional[float] = None
+
+
+class MealGlucosePredictRequest(BaseModel):
+    carbs_g: float
+    current_glucose_mg_dl: float
+    insulin_units: float = 0
+    """Hour 0–23 local meal time."""
+    meal_hour: int = 12
+    """Recent CGM/meter readings oldest-first (mg/dL). Dexcom-style ~5 min spacing assumed."""
+    glucose_readings_mg_dl: List[float] = []
+    """If set, server may recalibrate entered carbs when inconsistent with USDA-derived meal total."""
+    usda_derived_carbs_g: Optional[float] = None
+
+
+class MealGlucosePredictResponse(BaseModel):
+    direction: str  # likely_up, likely_down, uncertain
+    probability_up: float
+    validation_flags: List[str]
+    carbs_g_validated: float
+    carbs_recalibrated: bool
+    glucose_delta_estimate_mg_dl: Optional[float] = None
+    prediction_rejected: bool = False
+    rejection_reason: Optional[str] = None
+    disclaimer: str
+    features_used: Optional[dict] = None
+
+
+class DexcomImportReadingsBody(BaseModel):
+    """Paste readings from Dexcom receiver/export or Share-compatible intervals (mg/dL)."""
+    glucose_readings_mg_dl: List[float] = []
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordReset(BaseModel):
+    email: EmailStr
+    token: str
+    new_password: str
 
 class User(UserBase):
     id: int

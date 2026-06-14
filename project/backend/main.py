@@ -2,31 +2,55 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import List
 import requests
+import json
 
 from database import get_db, create_tables
 from models import User, Appointment as AppointmentModel, MedicalRecord as MedicalRecordModel, Medication as MedicationModel, Message as MessageModel, ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel
 from schemas import (
-    UserCreate, User as UserSchema, UserUpdate,
+    UserCreate, User as UserSchema, UserUpdate, PasswordChange,
+    OnboardingDemographicsUpdate,
+    OnboardingLabChoiceUpdate,
+    OnboardingCompleteUpdate,
+    PasswordResetRequest, PasswordReset,
     Appointment, AppointmentCreate, AppointmentUpdate,
     MedicalRecord, MedicalRecordCreate, MedicalRecordUpdate,
     Medication, MedicationCreate, MedicationUpdate,
     Message, MessageCreate,
     ChatMessage, ChatMessageCreate, ChatSession, ChatSessionCreate,
-    Token, DashboardData, GoogleAuthRequest
+    Token, DashboardData, GoogleAuthRequest,
+    DiabetesSettingsUpdate,
+    USDAFoodNutrients,
+    MealGlucosePredictRequest,
+    MealGlucosePredictResponse,
+    DexcomImportReadingsBody,
 )
-from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash
+from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, verify_password
 from config import settings
-from gemini_service import GeminiService
+from deepseek_service import DeepSeekService
+import usda_fdc
+import glucose_validation
+import glucose_ml_service
+import dexcom_integration
 
-# Create FastAPI app
+# =================================================================
+# GLOBAL API CONFIGURATION
+# =================================================================
 app = FastAPI(
     title="Healthcare Patient Portal API",
     description="Backend API for healthcare patient portal mobile app",
     version="1.0.0"
 )
+
+# Debug: Check DeepSeek API key on startup
+@app.on_event("startup")
+async def startup_event():
+    if settings.deepseek_api_key:
+        print(f"✓ DeepSeek API key loaded (length: {len(settings.deepseek_api_key)})")
+    else:
+        print("✗ WARNING: DeepSeek API key is not set! Check your .env file.")
 
 # CORS middleware
 app.add_middleware(
@@ -50,7 +74,10 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# Authentication endpoints
+# =================================================================
+# AUTHENTICATION ENDPOINTS
+# =================================================================
+# These routes handle user signup, login, and password management.
 @app.post("/auth/register", response_model=UserSchema)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
@@ -71,7 +98,10 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         phone=user.phone,
         date_of_birth=user.date_of_birth,
         blood_type=user.blood_type,
-        emergency_contact=user.emergency_contact
+        emergency_contact=user.emergency_contact,
+        address=user.address,
+        gender=user.gender,
+        onboarding_completed=False,
     )
     
     db.add(db_user)
@@ -128,6 +158,7 @@ async def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)
                 google_picture=picture,
                 hashed_password=None,
                 is_active=True,
+                onboarding_completed=False,
             )
             db.add(user)
             db.commit()
@@ -149,7 +180,10 @@ async def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)
     except requests.RequestException:
         raise HTTPException(status_code=502, detail="Failed to verify token with Google")
 
-# User endpoints
+# =================================================================
+# USER & PROFILE ENDPOINTS
+# =================================================================
+# Used for fetching and updating the currently logged-in user's data.
 @app.get("/users/me", response_model=UserSchema)
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Get current user information."""
@@ -169,29 +203,156 @@ async def update_user_me(
     db.refresh(current_user)
     return current_user
 
-# Dashboard endpoint
+@app.patch("/users/me/onboarding", response_model=UserSchema)
+async def update_onboarding_demographics(
+    payload: OnboardingDemographicsUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Save demographics collected during onboarding."""
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@app.patch("/users/me/onboarding/lab-choice", response_model=UserSchema)
+async def update_onboarding_lab_choice(
+    payload: OnboardingLabChoiceUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    current_user.onboarding_lab_opt_in = payload.onboarding_lab_opt_in
+    if payload.onboarding_completed is not None:
+        current_user.onboarding_completed = payload.onboarding_completed
+    elif payload.onboarding_lab_opt_in is False:
+        current_user.onboarding_completed = True
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@app.patch("/users/me/onboarding/complete", response_model=UserSchema)
+async def complete_onboarding(
+    payload: OnboardingCompleteUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    current_user.onboarding_completed = payload.onboarding_completed
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@app.post("/users/me/change-password")
+async def change_password(
+    password_change: PasswordChange,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Change user password."""
+    # Verify current password
+    if not current_user.hashed_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Password not set. This account uses Google authentication."
+        )
+    
+    if not verify_password(password_change.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect"
+        )
+    
+    # Update password
+    current_user.hashed_password = get_password_hash(password_change.new_password)
+    db.commit()
+    
+    return {"message": "Password changed successfully"}
+
+@app.post("/auth/forgot-password")
+async def forgot_password(
+    request: PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """Request password reset. In production, send email with reset token."""
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        # Don't reveal if email exists for security
+        return {"message": "If the email exists, a password reset link has been sent."}
+    
+    # In production, generate reset token and send email
+    # For now, just return success message
+    # TODO: Implement email sending with reset token
+    return {"message": "If the email exists, a password reset link has been sent."}
+
+@app.post("/auth/reset-password")
+async def reset_password(
+    reset: PasswordReset,
+    db: Session = Depends(get_db)
+):
+    """Reset password with token. In production, verify token from email."""
+    user = db.query(User).filter(User.email == reset.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # In production, verify reset token here
+    # TODO: Implement token verification
+    # For now, allow reset (not secure, implement properly in production)
+    
+    user.hashed_password = get_password_hash(reset.new_password)
+    db.commit()
+    
+    return {"message": "Password reset successfully"}
+
+# =================================================================
+# CLINICAL DATA ENDPOINTS
+# =================================================================
+# Handles appointments, medical records, and medications.
 @app.get("/dashboard", response_model=DashboardData)
 async def get_dashboard_data(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Get dashboard data for the current user."""
-    # Get upcoming appointments
+    # Get upcoming appointments (scheduled or any future appointments)
+    now = datetime.now()
     upcoming_appointments = db.query(AppointmentModel).filter(
         AppointmentModel.patient_id == current_user.id,
-        AppointmentModel.status == "scheduled"
-    ).order_by(AppointmentModel.appointment_date).limit(5).all()
+        AppointmentModel.status != "cancelled",
+        AppointmentModel.appointment_date >= now
+    ).order_by(AppointmentModel.appointment_date.asc()).limit(5).all()
+    
+    # If no scheduled appointments, get any future appointments (excluding cancelled)
+    if not upcoming_appointments:
+        upcoming_appointments = db.query(AppointmentModel).filter(
+            AppointmentModel.patient_id == current_user.id,
+            AppointmentModel.appointment_date >= now,
+            AppointmentModel.status != "cancelled"
+        ).order_by(AppointmentModel.appointment_date.asc()).limit(5).all()
     
     # Get recent medical records
     recent_records = db.query(MedicalRecordModel).filter(
         MedicalRecordModel.patient_id == current_user.id
     ).order_by(MedicalRecordModel.date.desc()).limit(10).all()
     
-    # Get current medications
+    # Convert record_data from JSON string to dict if needed
+    for record in recent_records:
+        if record.record_data and isinstance(record.record_data, str):
+            try:
+                record.record_data = json.loads(record.record_data)
+            except (json.JSONDecodeError, TypeError):
+                record.record_data = None
+    
+    # Get current medications (active ones first, then all if none active)
     current_medications = db.query(MedicationModel).filter(
         MedicationModel.patient_id == current_user.id,
         MedicationModel.is_active == True
     ).all()
+    
+    # If no active medications, get all medications
+    if not current_medications:
+        current_medications = db.query(MedicationModel).filter(
+            MedicationModel.patient_id == current_user.id
+        ).order_by(MedicationModel.created_at.desc()).limit(10).all()
     
     # Get unread messages count
     unread_messages = db.query(MessageModel).filter(
@@ -202,6 +363,8 @@ async def get_dashboard_data(
     # Calculate health metrics
     health_metrics = {
         "blood_type": current_user.blood_type,
+        "bmi": current_user.bmi or None,
+        "blood_pressure": current_user.blood_pressure or None,
         "total_appointments": len(upcoming_appointments),
         "active_medications": len(current_medications),
         "unread_messages": unread_messages
@@ -232,14 +395,75 @@ async def create_appointment(
     db: Session = Depends(get_db)
 ):
     """Create a new appointment."""
+    appointment_dict = appointment.dict()
+    # Ensure status is set to "scheduled" for new appointments
+    if 'status' not in appointment_dict or not appointment_dict.get('status'):
+        appointment_dict['status'] = "scheduled"
+    
     db_appointment = AppointmentModel(
-        **appointment.dict(),
+        **appointment_dict,
         patient_id=current_user.id
     )
     db.add(db_appointment)
     db.commit()
     db.refresh(db_appointment)
     return db_appointment
+
+@app.get("/appointments/{appointment_id}", response_model=Appointment)
+async def get_appointment(
+    appointment_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific appointment."""
+    appointment = db.query(AppointmentModel).filter(
+        AppointmentModel.id == appointment_id,
+        AppointmentModel.patient_id == current_user.id
+    ).first()
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return appointment
+
+@app.put("/appointments/{appointment_id}", response_model=Appointment)
+async def update_appointment(
+    appointment_id: int,
+    appointment_update: AppointmentUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update an appointment."""
+    db_appointment = db.query(AppointmentModel).filter(
+        AppointmentModel.id == appointment_id,
+        AppointmentModel.patient_id == current_user.id
+    ).first()
+    if not db_appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    update_data = appointment_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_appointment, key, value)
+    
+    db.commit()
+    db.refresh(db_appointment)
+    return db_appointment
+
+@app.delete("/appointments/{appointment_id}")
+async def delete_appointment(
+    appointment_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete an appointment."""
+    db_appointment = db.query(AppointmentModel).filter(
+        AppointmentModel.id == appointment_id,
+        AppointmentModel.patient_id == current_user.id
+    ).first()
+    if not db_appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    db.delete(db_appointment)
+    db.commit()
+    return {"message": "Appointment deleted successfully"}
 
 # Medical records endpoints
 @app.get("/medical-records", response_model=List[MedicalRecord])
@@ -248,7 +472,17 @@ async def get_medical_records(
     db: Session = Depends(get_db)
 ):
     """Get all medical records for the current user."""
-    return db.query(MedicalRecordModel).filter(MedicalRecordModel.patient_id == current_user.id).all()
+    records = db.query(MedicalRecordModel).filter(MedicalRecordModel.patient_id == current_user.id).all()
+    
+    # Convert record_data from JSON string to dict if needed
+    for record in records:
+        if record.record_data and isinstance(record.record_data, str):
+            try:
+                record.record_data = json.loads(record.record_data)
+            except (json.JSONDecodeError, TypeError):
+                record.record_data = None
+    
+    return records
 
 @app.post("/medical-records", response_model=MedicalRecord)
 async def create_medical_record(
@@ -291,7 +525,10 @@ async def create_medication(
     db.refresh(db_medication)
     return db_medication
 
-# Chat endpoints
+# =================================================================
+# AI CHATBOT ENDPOINTS
+# =================================================================
+# Manages chat sessions and AI-driven medical assistance.
 @app.post("/chat/sessions", response_model=ChatSession)
 async def create_chat_session(
     current_user: User = Depends(get_current_active_user),
@@ -327,10 +564,10 @@ async def send_chat_message(
         
         # Generate AI response with fallback
         try:
-            ai_response = await GeminiService.generate_response(message.content, user_context)
-            suggestions = await GeminiService.generate_suggestions(message.content)
+            ai_response = await DeepSeekService.generate_response(message.content, user_context)
+            suggestions = await DeepSeekService.generate_suggestions(message.content)
         except Exception as e:
-            print(f"Gemini API error: {e}")
+            print(f"DeepSeek API error: {e}")
             ai_response = "I'm sorry, I'm having trouble connecting to my AI service right now. Please try again later or contact your healthcare provider for immediate assistance."
             suggestions = ["Contact your doctor", "Schedule an appointment", "Check your medications"]
         
@@ -359,6 +596,174 @@ async def send_chat_message(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+
+# =================================================================
+# CLINICAL MEAL / USDA / GLUCOSE ML (XGBoost + validation)
+# =================================================================
+
+
+@app.patch("/users/me/diabetes-settings", response_model=UserSchema)
+async def update_diabetes_settings(
+    body: DiabetesSettingsUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Save personalized ISF (mg/dL per unit) and ICR (g carb per unit)."""
+    if body.isf_mg_dl_per_unit is not None:
+        v = body.isf_mg_dl_per_unit
+        if v < 15 or v > 200:
+            raise HTTPException(status_code=400, detail="ISF outside typical range (15–200 mg/dL per unit)")
+        current_user.isf_mg_dl_per_unit = v
+    if body.icr_grams_per_unit is not None:
+        v = body.icr_grams_per_unit
+        if v < 4 or v > 120:
+            raise HTTPException(status_code=400, detail="ICR outside typical range (4–120 g per unit)")
+        current_user.icr_grams_per_unit = v
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.get("/nutrition/usda/search")
+async def nutrition_usda_search(
+    q: str,
+    page_size: int = 20,
+):
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Query q is required")
+    try:
+        hits = usda_fdc.search_foods(q.strip(), page_size=page_size)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}")
+
+    out = []
+    for h in hits:
+        fid = h.get("fdcId")
+        desc = h.get("description") or ""
+        if fid is not None:
+            out.append({"fdc_id": int(fid), "description": str(desc)[:500]})
+    return out
+
+
+@app.get("/nutrition/usda/food/{fdc_id}", response_model=USDAFoodNutrients)
+async def nutrition_usda_food_detail(
+    fdc_id: int,
+):
+    try:
+        detail = usda_fdc.get_food_detail(fdc_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}")
+
+    carbs = usda_fdc.extract_carbs_per_100g(detail)
+    kcal = usda_fdc.extract_energy_kcal_per_100g(detail)
+    desc = detail.get("description") or ""
+    return USDAFoodNutrients(
+        fdc_id=fdc_id,
+        description=str(desc)[:800],
+        carbs_g_per_100g=carbs,
+        energy_kcal_per_100g=kcal,
+    )
+
+
+@app.get("/integrations/dexcom")
+async def integrations_dexcom_status(current_user: User = Depends(get_current_active_user)):
+    has_tok = bool(getattr(current_user, "dexcom_refresh_token_enc", None))
+    return dexcom_integration.dexcom_status(has_tok)
+
+
+@app.post("/integrations/dexcom/import-readings")
+async def integrations_dexcom_import_readings(
+    body: DexcomImportReadingsBody,
+    current_user: User = Depends(get_current_active_user),
+):
+    readings = dexcom_integration.normalize_readings(body.glucose_readings_mg_dl)
+    return {"readings_mg_dl": readings, "count": len(readings)}
+
+
+@app.post("/glucose/predict-meal", response_model=MealGlucosePredictResponse)
+async def glucose_predict_meal(
+    req: MealGlucosePredictRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    disclaimer = (
+        "Educational estimate only—not medical advice. Confirm with CGM/meter and your care team."
+    )
+    icr = float(current_user.icr_grams_per_unit or glucose_ml_service.DEFAULT_ICR)
+    isf = float(current_user.isf_mg_dl_per_unit or glucose_ml_service.DEFAULT_ISF)
+
+    usda_total = req.usda_derived_carbs_g
+    cv = glucose_validation.validate_and_normalize_carbs(req.carbs_g, usda_derived_total=usda_total)
+    carbs_v = cv.carbs_g
+    flags = list(cv.flags)
+
+    ok_trend, trend_reason = glucose_validation.validate_reading_trend_slope(req.glucose_readings_mg_dl or [])
+    if not ok_trend:
+        return MealGlucosePredictResponse(
+            direction="uncertain",
+            probability_up=0.5,
+            validation_flags=flags + [trend_reason or "trend_invalid"],
+            carbs_g_validated=carbs_v,
+            carbs_recalibrated=cv.recalibrated,
+            glucose_delta_estimate_mg_dl=None,
+            prediction_rejected=True,
+            rejection_reason=trend_reason,
+            disclaimer=disclaimer,
+            features_used=None,
+        )
+
+    delta_est = glucose_validation.estimate_glucose_delta_mg_dl(
+        carbs_v, req.insulin_units, icr, isf
+    )
+    ok_d, d_reason = glucose_validation.validate_glucose_delta(delta_est)
+    if not ok_d:
+        return MealGlucosePredictResponse(
+            direction="uncertain",
+            probability_up=0.5,
+            validation_flags=flags + [d_reason or "delta_invalid"],
+            carbs_g_validated=carbs_v,
+            carbs_recalibrated=cv.recalibrated,
+            glucose_delta_estimate_mg_dl=float(delta_est),
+            prediction_rejected=True,
+            rejection_reason=d_reason,
+            disclaimer=disclaimer,
+            features_used=None,
+        )
+
+    direction, p_up, feats = glucose_ml_service.predict_direction_proba(
+        carbs_v,
+        req.current_glucose_mg_dl,
+        req.insulin_units,
+        req.meal_hour,
+        req.glucose_readings_mg_dl or [],
+        icr,
+        isf,
+        current_user.id,
+    )
+
+    if direction == "likely_up" and delta_est < -35:
+        direction = "uncertain"
+        flags.append("model_vs_heuristic_mismatch")
+    elif direction == "likely_down" and delta_est > 35:
+        direction = "uncertain"
+        flags.append("model_vs_heuristic_mismatch")
+
+    return MealGlucosePredictResponse(
+        direction=direction,
+        probability_up=p_up,
+        validation_flags=flags,
+        carbs_g_validated=carbs_v,
+        carbs_recalibrated=cv.recalibrated,
+        glucose_delta_estimate_mg_dl=float(delta_est),
+        prediction_rejected=False,
+        rejection_reason=None,
+        disclaimer=disclaimer,
+        features_used=feats,
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

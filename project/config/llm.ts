@@ -48,34 +48,7 @@ function getFallbackResponse(userText: string): string {
   return "I'm here to help with your healthcare needs! I can answer medical questions, explain conditions, discuss treatments, and provide health guidance. What would you like to know?";
 }
 
-// OpenAI API integration
-async function callOpenAI(messages: ChatMessage[]): Promise<string> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEYS.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: HEALTHCARE_SYSTEM_PROMPT },
-        ...messages,
-      ],
-      max_tokens: 1000,
-      temperature: 0.7,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || 'I apologize, but I could not generate a response.';
-}
-
-// Groq API integration (backup)
+// Groq API integration
 async function callGroq(messages: ChatMessage[]): Promise<string> {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -104,16 +77,7 @@ async function callGroq(messages: ChatMessage[]): Promise<string> {
 
 // Main AI chat function with fallbacks
 export async function groqChat(messages: ChatMessage[]): Promise<string> {
-  // Try OpenAI first
-  if (API_KEYS.OPENAI_API_KEY && API_KEYS.OPENAI_API_KEY !== 'sk-your-openai-api-key-here') {
-    try {
-      return await callOpenAI(messages);
-    } catch (error) {
-      console.log('OpenAI failed, trying Groq:', error);
-    }
-  }
-
-  // Try Groq as backup
+  // Try Groq API
   if (API_KEYS.GROQ_API_KEY) {
     try {
       return await callGroq(messages);

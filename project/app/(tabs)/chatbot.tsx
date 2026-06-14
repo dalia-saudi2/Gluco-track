@@ -1,35 +1,43 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  SafeAreaView, 
-  TouchableOpacity, 
-  TextInput, 
-  ScrollView, 
-  KeyboardAvoidingView, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Pressable,
 } from 'react-native';
-import { 
-  Send, 
-  Bot, 
-  User, 
-  Phone, 
-  Calendar, 
-  FileText, 
-  Heart, 
+import {
+  Send,
+  Bot,
+  User,
+  Phone,
+  Calendar,
+  FileText,
+  Heart,
   AlertCircle,
-  Settings,
-  ChevronDown,
-  X,
-  RefreshCw
+  RefreshCw,
+  Sparkles,
+  Stethoscope,
 } from 'lucide-react-native';
-import { useRouter, usePathname } from 'expo-router';
 import { groqChat, groqSuggestions } from '../../config/llm';
+import { useAuth } from '../../contexts/AuthContext';
+import { chatbotService } from '../../services/chatbotService';
+import { VitalisShell } from '../../components/vitalis/VitalisShell';
+import { CandyCard } from '../../components/dashboard/CandyCard';
+import { DF, DashboardPalette } from '../../constants/DashboardColors';
+import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
 
-// Types
+/**
+ * DATA MODELS (Type Safety)
+ * In a medical app, type safety is critical. These interfaces ensure that
+ * every message follows a strict structure, reducing UI bugs during clinical use.
+ */
 interface Message {
   id: string;
   text: string;
@@ -62,56 +70,63 @@ const quickActions: QuickAction[] = [
     id: 'symptoms',
     title: 'Ask About Symptoms',
     icon: 'Heart',
-    action: () => {}
+    action: () => { }
   },
   {
     id: 'conditions',
     title: 'Learn About Conditions',
     icon: 'FileText',
-    action: () => {}
+    action: () => { }
   },
   {
     id: 'medications',
     title: 'Medication Questions',
     icon: 'Heart',
-    action: () => {}
+    action: () => { }
   },
   {
     id: 'emergency',
     title: 'Emergency Help',
     icon: 'Phone',
-    action: () => {}
+    action: () => { }
   }
 ];
 
-// Fallback responses for when Gemini is unavailable
+/**
+ * CLINICAL SAFETY: DETERMINISTIC FALLBACKS
+ * Discussion Point: "What if the AI is unreachable?"
+ * This logic ensures the app provides value even without an internet connection.
+ * It uses pattern matching to give immediate, safe advice for common medical queries.
+ */
 const getFallbackResponse = (userMessage: string): string => {
   const message = userMessage.toLowerCase();
-  
+
   if (message.includes('appointment') || message.includes('schedule')) {
     return "I can help you schedule an appointment! You can view available slots in the Appointments tab or I can assist you with specific scheduling needs.";
   }
-  
+
   if (message.includes('record') || message.includes('test') || message.includes('lab')) {
     return "Your medical records are available in the Records tab. I can help you understand specific test results or guide you to the right information.";
   }
-  
+
   if (message.includes('medication') || message.includes('prescription') || message.includes('medicine')) {
     return "For medication-related questions, please check your Records tab for prescriptions, or contact your healthcare provider directly for urgent medication concerns.";
   }
-  
+
   if (message.includes('emergency') || message.includes('urgent') || message.includes('help')) {
     return "For medical emergencies, please call 911 immediately. For urgent but non-emergency concerns, contact your healthcare provider or use the emergency contact feature.";
   }
-  
+
   if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
     return "Hello! I'm your AI healthcare assistant. I can help you with appointments, medical records, medication questions, and general health information. How can I assist you today?";
   }
-  
+
+  // 1. Fallback Logic: When AI API is down or slow, we use these hardcoded rules
+  // to ensure the user always gets a helpful response.
   if (message.includes('thank') || message.includes('thanks')) {
     return "You're welcome! I'm here to help whenever you need assistance with your healthcare needs.";
   }
-  
+
   // Default responses
   const defaultResponses = [
     "I understand you're looking for help. Could you be more specific about what you need assistance with?",
@@ -119,46 +134,17 @@ const getFallbackResponse = (userMessage: string): string => {
     "I'm here to assist you with your healthcare needs. Please let me know how I can help you today.",
     "For specific medical advice, I recommend consulting with your healthcare provider. I can help you navigate the app or answer general questions."
   ];
-  
+
   return defaultResponses[Math.floor(Math.random() * defaultResponses.length)];
 };
-
+// screen of chatbot
+// check token and if can connect to backend or use AI locally
 export default function ChatbotScreen() {
-  const router = useRouter();
-  const pathname = usePathname();
+  const { isAuthenticated, isLoading: authIsLoading, user, logout } = useAuth();
+  const D = useD();
+  const styles = useDashboardStyles(createChatStyles);
   const scrollViewRef = useRef<ScrollView>(null);
-  const [currentTab, setCurrentTab] = useState('chatbot');
-  const activeTab = React.useMemo(() => {
-    if (!pathname) return 'chatbot';
-    if (pathname === '/(tabs)') return 'index';
-    if (pathname.startsWith('/(tabs)/records')) return 'records';
-    if (pathname.startsWith('/(tabs)/appointments')) return 'appointments';
-    if (pathname.startsWith('/(tabs)/profile')) return 'profile';
-    if (pathname.startsWith('/(tabs)/chatbot')) return 'chatbot';
-    return 'chatbot';
-  }, [pathname]);
-
-  const handleTabChange = (tab: string) => {
-    setCurrentTab(tab);
-    if (tab !== 'chatbot') {
-      switch (tab) {
-        case 'index':
-          router.push('/(tabs)');
-          break;
-        case 'records':
-          router.push('/(tabs)/records');
-          break;
-        case 'appointments':
-          router.push('/(tabs)/appointments');
-          break;
-        case 'profile':
-          router.push('/(tabs)/profile');
-          break;
-        default:
-          break;
-      }
-    }
-  };
+  const [isInitializing, setIsInitializing] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -167,6 +153,8 @@ export default function ChatbotScreen() {
       isUser: false,
       timestamp: new Date(),
       type: 'text',
+      // DISCUSSION: We start with a comprehensive welcome message to set 
+      // expectations about the AI's capabilities as a "healthcare assistant."
       quickActions: quickActions
     }
   ]);
@@ -181,12 +169,34 @@ export default function ChatbotScreen() {
     errorCount: 0
   });
 
-  // Auto-scroll to bottom when new messages arrive
+  // Initialize chat session when authenticated
+  useEffect(() => {
+    if (isAuthenticated && !authIsLoading) {
+      const initializeSession = async () => {
+        try {
+          setIsInitializing(true);
+          await chatbotService.getOrCreateSession();
+        } catch (error) {
+          console.error('Failed to initialize chat session:', error);
+        } finally {
+          setIsInitializing(false);
+        }
+      };
+      initializeSession();
+    }
+  }, [isAuthenticated, authIsLoading]);
+
+  // DISCUSSION: UX - Auto-scroll behavior.
+  // In a chat interface, users expect to see the latest message. 
+  // This side-effect ensures context-awareness by scrolling to the newest 
+  // message whenever the 'messages' array updates.
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  // Handle sending a message with Gemini AI
+  // 3. Message Handling Logic
+  // This function coordindates sending text to the primary AI (Backend)
+  // or falling back to a local LLM if the server is unreachable.
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
 
@@ -205,12 +215,30 @@ export default function ChatbotScreen() {
     setShowQuickActions(false);
 
     try {
-      // Generate response using Gemini AI
-      const botResponse = await groqChat([{ role: 'user', content: currentInput }]);
-      
-      // Generate suggestions for follow-up
-      const suggestions = await groqSuggestions(currentInput);
-      
+      let botResponse: string;
+      let suggestions: string[] = [];
+
+      // Try backend first if authenticated
+      if (isAuthenticated) {
+        try {
+          const backendResponse = await chatbotService.sendMessage(currentInput);
+          botResponse = backendResponse.text;
+          suggestions = backendResponse.suggestions || [];
+        } catch (backendError) {
+          console.warn('Backend chat failed, falling back to local LLM:', backendError);
+          // Fallback to local LLM
+          botResponse = await groqChat([{ role: 'user', content: currentInput }]);
+          suggestions = await groqSuggestions(currentInput);
+        }
+      } else {
+        // DISCUSSION: "HYBRID AI STRATEGY"
+        // 1. Primary: Backend AI (Personalized, has database context)
+        // 2. Secondary: Groq/Local LLM (Fast, fallback if server is down)
+        // 3. Last Resort: Hardcoded Rules (Deterministic, always works)
+        botResponse = await groqChat([{ role: 'user', content: currentInput }]);
+        suggestions = await groqSuggestions(currentInput);
+      }
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: botResponse,
@@ -221,15 +249,15 @@ export default function ChatbotScreen() {
       };
 
       setMessages(prev => [...prev, botMessage]);
-      setChatbotState(prev => ({ 
-        ...prev, 
+      setChatbotState(prev => ({
+        ...prev,
         lastResponse: new Date(),
         isConnected: true,
         errorCount: 0
       }));
     } catch (error) {
       console.error('Error getting AI response:', error);
-      
+
       // Use fallback response
       const fallbackResponse = getFallbackResponse(currentInput);
       const errorMessage: Message = {
@@ -242,8 +270,8 @@ export default function ChatbotScreen() {
       };
 
       setMessages(prev => [...prev, errorMessage]);
-      setChatbotState(prev => ({ 
-        ...prev, 
+      setChatbotState(prev => ({
+        ...prev,
         lastResponse: new Date(),
         isConnected: false,
         errorCount: prev.errorCount + 1
@@ -256,7 +284,9 @@ export default function ChatbotScreen() {
   // Handle suggestion selection
   const handleSuggestion = (suggestion: string) => {
     setInputText(suggestion);
-    // Auto-send the suggestion
+    // UI/UX DISCUSSION: Immediate feedback.
+    // Instead of making the user click 'Send' after clicking a suggestion,
+    // we trigger the send logic automatically to reduce friction (tap-to-send).
     setTimeout(() => {
       handleSendMessage();
     }, 100);
@@ -269,9 +299,25 @@ export default function ChatbotScreen() {
 
     setIsTyping(true);
     try {
-      const botResponse = await groqChat([{ role: 'user', content: message.text }]);
-      const suggestions = await groqSuggestions(message.text);
-      
+      let botResponse: string;
+      let suggestions: string[] = [];
+
+      // Try backend first if authenticated
+      if (isAuthenticated) {
+        try {
+          const backendResponse = await chatbotService.sendMessage(message.text);
+          botResponse = backendResponse.text;
+          suggestions = backendResponse.suggestions || [];
+        } catch (backendError) {
+          console.warn('Backend retry failed, using local LLM:', backendError);
+          botResponse = await groqChat([{ role: 'user', content: message.text }]);
+          suggestions = await groqSuggestions(message.text);
+        }
+      } else {
+        botResponse = await groqChat([{ role: 'user', content: message.text }]);
+        suggestions = await groqSuggestions(message.text);
+      }
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: botResponse,
@@ -282,8 +328,8 @@ export default function ChatbotScreen() {
       };
 
       setMessages(prev => [...prev, botMessage]);
-      setChatbotState(prev => ({ 
-        ...prev, 
+      setChatbotState(prev => ({
+        ...prev,
         isConnected: true,
         errorCount: 0
       }));
@@ -319,11 +365,13 @@ export default function ChatbotScreen() {
         setInputText("I have questions about my medications");
         break;
       case 'emergency':
+        // DISCUSSION: Emergency protocols are hardcoded for safety.
+        // We never let an AI decide what to do in a life-threatening situation.
         Alert.alert(
           'Emergency Contact',
           'For medical emergencies, call 911 immediately. For urgent concerns, contact your healthcare provider.',
           [
-            { text: 'Call 911', onPress: () => {/* Implement phone call */} },
+            { text: 'Call 911', onPress: () => {/* Implement phone call */ } },
             { text: 'Cancel', style: 'cancel' }
           ]
         );
@@ -331,49 +379,76 @@ export default function ChatbotScreen() {
     }
   };
 
-  // Message bubble component
+  const resetChat = () => {
+    chatbotService.resetSession();
+    setMessages([
+      {
+        id: '1',
+        text: "Hello! I'm your Diabetes Care Hub AI assistant. I can help with glucose management, medications, appointments, and general diabetes questions. How can I help you today?",
+        isUser: false,
+        timestamp: new Date(),
+        type: 'text',
+        quickActions: quickActions,
+      },
+    ]);
+    setShowQuickActions(true);
+  };
+
+  const headerTools = (
+    <View style={styles.headerTools}>
+      <Pressable style={styles.toolBtn} onPress={resetChat} accessibilityLabel="Start new chat">
+        <RefreshCw size={18} color={D.onSurfaceVariant} />
+      </Pressable>
+      <Pressable
+        style={[styles.toolBtn, showQuickActions && styles.toolBtnActive]}
+        onPress={() => setShowQuickActions(!showQuickActions)}
+        accessibilityLabel="Toggle quick actions"
+      >
+        <Sparkles size={18} color={showQuickActions ? D.onPrimary : D.onSurfaceVariant} />
+      </Pressable>
+    </View>
+  );
+
   const MessageBubble = ({ message }: { message: Message }) => (
-    <View style={[
-      styles.messageBubble,
-      message.isUser ? styles.userMessage : styles.botMessage,
-      message.isError && styles.errorMessage
-    ]}>
+    <View
+      style={[
+        styles.messageBubble,
+        message.isUser ? styles.userMessage : styles.botMessage,
+        message.isError && styles.errorMessage,
+      ]}
+    >
       <View style={styles.messageHeader}>
         {message.isUser ? (
-          <User size={16} color="#1E3A8A" />
+          <User size={14} color={D.onPrimary} />
         ) : (
-          <Bot size={16} color={message.isError ? "#ef4444" : "#059669"} />
+          <Bot size={14} color={message.isError ? D.error : D.secondary} />
         )}
         <Text style={styles.messageTime}>
           {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Text>
         {message.isError && (
-          <TouchableOpacity 
-            style={styles.retryButton}
-            onPress={() => handleRetry(message.id)}
-            accessibilityLabel="Retry message"
-          >
-            <RefreshCw size={14} color="#ef4444" />
+          <TouchableOpacity style={styles.retryButton} onPress={() => handleRetry(message.id)}>
+            <RefreshCw size={14} color={D.error} />
           </TouchableOpacity>
         )}
       </View>
-      <Text style={[
-        styles.messageText,
-        message.isUser ? styles.userMessageText : styles.botMessageText,
-        message.isError && styles.errorMessageText
-      ]}>
+      <Text
+        style={[
+          styles.messageText,
+          message.isUser ? styles.userMessageText : styles.botMessageText,
+          message.isError && styles.errorMessageText,
+        ]}
+      >
         {message.text}
       </Text>
-      {/* Suggestions */}
       {message.suggestions && message.suggestions.length > 0 && (
         <View style={styles.suggestionsContainer}>
-          <Text style={styles.suggestionsTitle}>Suggestions:</Text>
+          <Text style={styles.suggestionsTitle}>Suggestions</Text>
           {message.suggestions.map((suggestion, index) => (
             <TouchableOpacity
               key={index}
               style={styles.suggestionButton}
               onPress={() => handleSuggestion(suggestion)}
-              accessibilityLabel={`Suggestion: ${suggestion}`}
             >
               <Text style={styles.suggestionText}>{suggestion}</Text>
             </TouchableOpacity>
@@ -383,396 +458,262 @@ export default function ChatbotScreen() {
     </View>
   );
 
-  // Quick actions component
-  const QuickActions = () => (
-    <View style={styles.quickActionsContainer}>
-      <Text style={styles.quickActionsTitle}>Quick Actions</Text>
-      <View style={styles.quickActionsGrid}>
-        {quickActions.map((action) => (
-          <TouchableOpacity
-            key={action.id}
-            style={styles.quickActionButton}
-            onPress={() => handleQuickAction(action)}
-            accessibilityLabel={action.title}
-          >
-            <View style={styles.quickActionIcon}>
-              {action.icon === 'Calendar' && <Calendar size={20} color="#1E3A8A" />}
-              {action.icon === 'FileText' && <FileText size={20} color="#1E3A8A" />}
-              {action.icon === 'Phone' && <Phone size={20} color="#1E3A8A" />}
-              {action.icon === 'Heart' && <Heart size={20} color="#1E3A8A" />}
-            </View>
-            <Text style={styles.quickActionText}>{action.title}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+  const QuickActionsPanel = () => (
+    <View style={styles.quickGrid}>
+      {quickActions.map((action) => (
+        <Pressable key={action.id} style={styles.quickChip} onPress={() => handleQuickAction(action)}>
+          <View style={styles.quickIcon}>
+            {action.icon === 'Calendar' && <Calendar size={16} color={D.primary} />}
+            {action.icon === 'FileText' && <FileText size={16} color={D.secondary} />}
+            {action.icon === 'Phone' && <Phone size={16} color={D.error} />}
+            {action.icon === 'Heart' && <Heart size={16} color={D.tertiary} />}
+          </View>
+          <Text style={styles.quickChipText}>{action.title}</Text>
+        </Pressable>
+      ))}
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.profileSection}>
-            <View style={styles.profileImage}>
-              <User size={24} color="#1E3A8A" />
+    <VitalisShell
+      activeNavId="chatbot"
+      userName={user?.full_name || 'Patient'}
+      onLogout={logout}
+      headerExtra={headerTools}
+      disableScroll
+    >
+      <View style={styles.page}>
+        <View style={styles.pageHead}>
+          <View style={styles.pageHeadLeft}>
+            <View style={styles.aiAvatar}>
+              <Bot size={22} color={D.onPrimary} />
             </View>
-            <Text style={styles.welcomeText}>Hello Farida</Text>
+            <View>
+              <Text style={styles.pageTitle}>AI Assistant</Text>
+              <Text style={styles.pageSub}>Diabetes care guidance · powered by AI</Text>
+            </View>
           </View>
-        </View>
-        
-        {/* Navigation Options */}
-        <View style={styles.navigationSection}>
-          <TouchableOpacity 
-            style={[styles.navButton, activeTab === 'index' && styles.activeNavButton]}
-            onPress={() => handleTabChange('index')}
-          >
-            <User size={16} color={activeTab === 'index' ? '#ffffff' : '#1E3A8A'} />
-            <Text style={[styles.navText, activeTab === 'index' && styles.activeNavText]}>Dashboard</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.navButton, activeTab === 'records' && styles.activeNavButton]}
-            onPress={() => handleTabChange('records')}
-          >
-            <FileText size={16} color={activeTab === 'records' ? '#ffffff' : '#1E3A8A'} />
-            <Text style={[styles.navText, activeTab === 'records' && styles.activeNavText]}>Records</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.navButton, activeTab === 'appointments' && styles.activeNavButton]}
-            onPress={() => handleTabChange('appointments')}
-          >
-            <Calendar size={16} color={activeTab === 'appointments' ? '#ffffff' : '#1E3A8A'} />
-            <Text style={[styles.navText, activeTab === 'appointments' && styles.activeNavText]}>Appointments</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.navButton, activeTab === 'chatbot' && styles.activeNavButton]}
-            onPress={() => handleTabChange('chatbot')}
-          >
-            <Bot size={16} color={activeTab === 'chatbot' ? '#ffffff' : '#1E3A8A'} />
-            <Text style={[styles.navText, activeTab === 'chatbot' && styles.activeNavText]}>AI Assistant</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.navButton, activeTab === 'profile' && styles.activeNavButton]}
-            onPress={() => handleTabChange('profile')}
-          >
-            <User size={16} color={activeTab === 'profile' ? '#ffffff' : '#1E3A8A'} />
-            <Text style={[styles.navText, activeTab === 'profile' && styles.activeNavText]}>Profile</Text>
-          </TouchableOpacity>
-        </View>
-        
-        <View style={styles.headerRight}>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            onPress={() => setShowQuickActions(!showQuickActions)}
-            accessibilityLabel="Toggle quick actions"
-          >
-            {showQuickActions ? <X size={20} color="#1E3A8A" /> : <Settings size={20} color="#1E3A8A" />}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Quick Actions */}
-      {showQuickActions && <QuickActions />}
-
-      {/* Messages */}
-      <KeyboardAvoidingView 
-        style={styles.messagesContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
-          
-          {isTyping && (
-            <View style={[styles.messageBubble, styles.botMessage]}>
-              <View style={styles.typingIndicator}>
-                <ActivityIndicator size="small" color="#059669" />
-                <Text style={styles.typingText}>AI is typing...</Text>
-              </View>
+          {authIsLoading || isInitializing ? (
+            <View style={styles.statusPill}>
+              <ActivityIndicator size="small" color={D.primary} />
+              <Text style={styles.statusPillText}>Connecting...</Text>
+            </View>
+          ) : isAuthenticated ? (
+            <View style={[styles.statusPill, styles.statusOnline]}>
+              <View style={styles.statusDot} />
+              <Text style={[styles.statusPillText, styles.statusOnlineText]}>Online</Text>
+            </View>
+          ) : (
+            <View style={[styles.statusPill, styles.statusOffline]}>
+              <AlertCircle size={12} color={D.orange} />
+              <Text style={styles.statusPillText}>Local AI</Text>
             </View>
           )}
-        </ScrollView>
-
-        {/* Input Area */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.textInput}
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder="Type your message..."
-              placeholderTextColor="#9ca3af"
-              multiline
-              maxLength={500}
-              accessibilityLabel="Message input"
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!inputText.trim()}
-              accessibilityLabel="Send message"
-            >
-              <Send size={20} color={inputText.trim() ? "#ffffff" : "#9ca3af"} />
-            </TouchableOpacity>
-          </View>
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+        {showQuickActions && (
+          <CandyCard style={styles.quickCard}>
+            <Text style={styles.quickTitle}>Quick prompts</Text>
+            <QuickActionsPanel />
+          </CandyCard>
+        )}
+
+        <CandyCard style={styles.chatCard}>
+          <KeyboardAvoidingView
+            style={styles.chatBody}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+          >
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesList}
+              contentContainerStyle={styles.messagesContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {messages.map((message) => (
+                <MessageBubble key={message.id} message={message} />
+              ))}
+              {isTyping && (
+                <View style={[styles.messageBubble, styles.botMessage]}>
+                  <View style={styles.typingIndicator}>
+                    <ActivityIndicator size="small" color={D.primary} />
+                    <Text style={styles.typingText}>AI is thinking...</Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder="Ask about glucose, meds, diet, appointments..."
+                placeholderTextColor={D.onSurfaceVariant}
+                multiline
+                maxLength={500}
+              />
+              <Pressable
+                style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+                onPress={handleSendMessage}
+                disabled={!inputText.trim() || isTyping}
+              >
+                <Send size={18} color={inputText.trim() ? D.onPrimary : D.onSurfaceVariant} />
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
+        </CandyCard>
+
+        <View style={styles.disclaimer}>
+          <Stethoscope size={12} color={D.onSurfaceVariant} />
+          <Text style={styles.disclaimerText}>
+            Not a substitute for professional medical advice. For emergencies, call 911.
+          </Text>
+        </View>
+      </View>
+    </VitalisShell>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+function createChatStyles(D: DashboardPalette) {
+  return {
+  page: { flex: 1, gap: 12 },
+  pageHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  pageHeadLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  aiAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: D.primary,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  headerLeft: {
-    minWidth: 200,
-  },
-  profileSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#e5e7eb',
     justifyContent: 'center',
+  },
+  pageTitle: { fontFamily: DF.bold, fontSize: 22, color: D.onSurface },
+  pageSub: { fontFamily: DF.medium, fontSize: 12, color: D.onSurfaceVariant, marginTop: 2 },
+  statusPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: D.surfaceContainer,
   },
-  welcomeText: {
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1E3A8A',
+  statusOnline: { backgroundColor: 'rgba(22,163,74,0.1)' },
+  statusOffline: { backgroundColor: '#fff7ed' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: D.green },
+  statusPillText: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant },
+  statusOnlineText: { color: D.green },
+  headerTools: { flexDirection: 'row', gap: 6 },
+  toolBtn: {
+    padding: 8,
+    borderRadius: 999,
+    backgroundColor: D.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: D.borderMedium,
   },
-  navigationSection: {
+  toolBtnActive: { backgroundColor: D.primary, borderColor: D.primary },
+  quickCard: { padding: 14 },
+  quickTitle: {
+    fontFamily: DF.bold,
+    fontSize: 10,
+    color: D.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  quickChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    flex: 1,
-    justifyContent: 'center',
-  },
-  navButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'transparent',
-    gap: 6,
-  },
-  activeNavButton: {
-    backgroundColor: '#1E3A8A',
-  },
-  navText: {
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#1E3A8A',
-  },
-  activeNavText: {
-    color: '#ffffff',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#f3f4f6',
-  },
-  quickActionsContainer: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  quickActionsTitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#374151',
-    marginBottom: 12,
-  },
-  quickActionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  quickActionButton: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#f8fafc',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
+    borderRadius: 999,
+    backgroundColor: D.surfaceContainerLow,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: D.borderMedium,
+    minWidth: '47%',
   },
-  quickActionIcon: {
-    marginBottom: 8,
+  quickIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: D.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  quickActionText: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-    color: '#374151',
-    textAlign: 'center',
-  },
-  messagesContainer: {
-    flex: 1,
-  },
-  messagesList: {
-    flex: 1,
-  },
-  messagesContent: {
-    padding: 16,
-    paddingBottom: 8,
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 16,
-  },
+  quickChipText: { fontFamily: DF.medium, fontSize: 11, color: D.onSurface, flex: 1 },
+  chatCard: { flex: 1, padding: 0, overflow: 'hidden', minHeight: 320 },
+  chatBody: { flex: 1 },
+  messagesList: { flex: 1 },
+  messagesContent: { padding: 14, paddingBottom: 8 },
+  messageBubble: { maxWidth: '85%', marginBottom: 10, padding: 12, borderRadius: 18 },
   userMessage: {
-    backgroundColor: '#1E3A8A',
     alignSelf: 'flex-end',
+    backgroundColor: D.primary,
     borderBottomRightRadius: 4,
   },
   botMessage: {
-    backgroundColor: '#ffffff',
     alignSelf: 'flex-start',
+    backgroundColor: D.surfaceContainerLow,
     borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: D.borderSubtle,
   },
-  messageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+  errorMessage: { borderColor: 'rgba(229,62,62,0.35)', backgroundColor: '#fef2f2' },
+  messageHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  messageTime: { fontFamily: DF.medium, fontSize: 9, color: D.onSurfaceVariant },
+  messageText: { fontFamily: DF.medium, fontSize: 14, lineHeight: 20 },
+  userMessageText: { color: D.onPrimary },
+  botMessageText: { color: D.onSurface },
+  errorMessageText: { color: D.error },
+  retryButton: { marginLeft: 'auto', padding: 4, borderRadius: 999, backgroundColor: '#fee2e2' },
+  suggestionsContainer: { marginTop: 8, gap: 6 },
+  suggestionsTitle: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant, textTransform: 'uppercase' },
+  suggestionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: D.surface,
+    borderWidth: 1,
+    borderColor: D.accentBorder.primary,
   },
-  messageTime: {
-    fontSize: 10,
-    fontFamily: 'Inter_400Regular',
-    color: '#6b7280',
-  },
-  messageText: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 20,
-  },
-  userMessageText: {
-    color: '#ffffff',
-  },
-  botMessageText: {
-    color: '#374151',
-  },
-  typingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  typingText: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    color: '#6b7280',
-    fontStyle: 'italic',
-  },
+  suggestionText: { fontFamily: DF.medium, fontSize: 12, color: D.primary },
+  typingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  typingText: { fontFamily: DF.medium, fontSize: 12, color: D.onSurfaceVariant, fontStyle: 'italic' },
   inputContainer: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 12,
-    backgroundColor: '#f8fafc',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    gap: 10,
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(220,200,224,0.35)',
+    backgroundColor: D.surface,
   },
   textInput: {
     flex: 1,
+    fontFamily: DF.medium,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    color: '#374151',
+    color: D.onSurface,
     maxHeight: 100,
     paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: D.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: D.borderMedium,
   },
   sendButton: {
-    backgroundColor: '#1E3A8A',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: D.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: '#e5e7eb',
-  },
-  // Error message styles
-  errorMessage: {
-    borderColor: '#ef4444',
-    borderWidth: 1,
-  },
-  errorMessageText: {
-    color: '#ef4444',
-  },
-  retryButton: {
-    padding: 4,
-    borderRadius: 4,
-    backgroundColor: '#fef2f2',
-  },
-  // Suggestions styles
-  suggestionsContainer: {
-    marginTop: 8,
-    gap: 6,
-  },
-  suggestionsTitle: {
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  suggestionButton: {
-    backgroundColor: '#f3f4f6',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  suggestionText: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-    color: '#374151',
-  },
-});
+  sendButtonDisabled: { backgroundColor: D.surfaceContainerHigh },
+  disclaimer: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, paddingBottom: 4 },
+  disclaimerText: { flex: 1, fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, lineHeight: 14 },
+  };
+}

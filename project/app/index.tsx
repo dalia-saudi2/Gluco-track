@@ -1,14 +1,17 @@
-import { useEffect } from 'react';
-import { View } from 'react-native';
-import { router } from 'expo-router';
+import { Redirect } from 'expo-router';
+import { useAuth } from '../contexts/AuthContext';
+import { getOnboardingRoute } from '../utils/authRouting';
 
 export default function Index() {
-  useEffect(() => {
-    router.replace('/login');
-  }, []);
+  const { isAuthenticated, isLoading, user } = useAuth();
 
-  return <View />;
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/login" />;
+  }
+
+  return <Redirect href={getOnboardingRoute(user)} />;
 }
-
-
-
