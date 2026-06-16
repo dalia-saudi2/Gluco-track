@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -10,26 +9,46 @@ import {
   Platform,
   useWindowDimensions,
   ActivityIndicator,
+  TextInput,
   Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, HelpCircle, Venus, Mars } from 'lucide-react-native';
+import { ArrowLeft, HelpCircle, Venus, Mars, ChevronDown } from 'lucide-react-native';
 import { apiClient } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { authService } from '../../services/authService';
 import { showToast } from '../../components/ToastProvider';
+import { DatePicker } from '../../components/DatePicker';
 import {
   OnboardingColors as C,
   OnboardingTypography as T,
-  EDUCATION_LEVELS,
-  EDUCATION_TICKS,
   ETHNICITY_OPTIONS,
   EMPLOYMENT_OPTIONS,
   INCOME_OPTIONS,
   GENDER_OPTIONS,
 } from '../../constants/OnboardingColors';
+import {
+  DEGREE_OPTIONS,
+  getDobBounds,
+  getMajorGroupsForDegree,
+  getMajorOptionsForDegree,
+  validateDateOfBirth,
+  validateDegree,
+  validateMajor,
+  clampIsoDateToBounds,
+  type MajorSchoolGroup,
+} from '../../utils/onboardingValidation';
+import {
+  LANGUAGE_OPTIONS,
+  MARITAL_OPTIONS,
+  toApiEmployment,
+  toApiEthnicity,
+  toApiGender,
+} from '../../utils/featureEnums';
+import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
 const DESKTOP_BREAKPOINT = 768;
 const HEADER_HEIGHT = 64;
@@ -40,6 +59,105 @@ const FONT = {
   medium: 'DMSans_500Medium',
   bold: 'DMSans_700Bold',
 };
+
+const { min: minDob, max: maxDob } = getDobBounds();
+
+type SelectFieldProps = {
+  label: string;
+  value: string | null;
+  options?: readonly string[];
+  groups?: readonly MajorSchoolGroup[];
+  onChange: (value: string) => void;
+  hint: string;
+  desktop?: boolean;
+  menuMaxHeight?: number;
+};
+
+function SelectField({
+  label,
+  value,
+  options,
+  groups,
+  onChange,
+  hint,
+  desktop = false,
+  menuMaxHeight,
+}: SelectFieldProps) {
+  const [open, setOpen] = useState(false);
+
+  const renderOption = (option: string) => {
+    const selected = value === option;
+    return (
+      <Pressable
+        key={option}
+        onPress={() => {
+          onChange(option);
+          setOpen(false);
+        }}
+        style={({ pressed }) => [
+          styles.selectOption,
+          desktop && styles.selectOptionDesktop,
+          groups && styles.selectOptionGrouped,
+          selected && styles.selectOptionSelected,
+          pressed && styles.pillPressed,
+        ]}
+      >
+        <Text style={[styles.selectOptionText, selected && styles.selectOptionTextSelected]}>
+          {option}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const optionNodes = groups
+    ? groups.flatMap((group) => [
+        <Text
+          key={`${group.school}-header`}
+          style={[styles.selectGroupHeader, desktop && styles.selectGroupHeaderDesktop]}
+        >
+          {group.school}
+        </Text>,
+        ...group.majors.map((major) => renderOption(major)),
+      ])
+    : (options ?? []).map((option) => renderOption(option));
+
+  return (
+    <View style={styles.selectWrap}>
+      <Text style={[styles.sectionLabel, desktop && styles.sectionLabelDesktop]}>{label}</Text>
+      <Pressable
+        onPress={() => setOpen((prev) => !prev)}
+        style={({ pressed }) => [
+          styles.selectField,
+          desktop && styles.selectFieldDesktop,
+          open && styles.selectFieldActive,
+          pressed && styles.pillPressed,
+        ]}
+      >
+        <Text style={[styles.selectValue, !value && styles.selectValueEmpty]}>
+          {value ?? ''}
+        </Text>
+        <ChevronDown size={desktop ? 16 : 20} color={C.onSurfaceVariant} />
+      </Pressable>
+      {!value ? <Text style={styles.fieldHint}>{hint}</Text> : null}
+      {open ? (
+        <View style={[styles.selectMenu, desktop && styles.selectMenuDesktop]}>
+          {menuMaxHeight ? (
+            <ScrollView
+              style={[styles.selectMenuScroll, { maxHeight: menuMaxHeight }]}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
+              {optionNodes}
+            </ScrollView>
+          ) : (
+            optionNodes
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 type PillChipProps = {
   label: string;
@@ -81,26 +199,48 @@ function PillChip({ label, selected, onPress, icon, compact = false, desktop = f
 export default function DemographicsOnboardingScreen() {
   const router = useRouter();
   const { refreshUser } = useAuth();
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BREAKPOINT;
   const isWeb = Platform.OS === 'web';
 
-  const [age, setAge] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState<string | null>(null);
   const [gender, setGender] = useState<string | null>(null);
   const [ethnicity, setEthnicity] = useState<string | null>(null);
-  const [educationIndex, setEducationIndex] = useState(1);
+  const [degree, setDegree] = useState<string | null>(null);
+  const [major, setMajor] = useState<string | null>(null);
   const [employment, setEmployment] = useState<string | null>(null);
   const [income, setIncome] = useState<string | null>(null);
-  const [ageFocused, setAgeFocused] = useState(false);
+  const [nationality, setNationality] = useState('');
+  const [maritalStatus, setMaritalStatus] = useState<string | null>(null);
+  const [preferredLanguage, setPreferredLanguage] = useState<'en' | 'ar'>('en');
+  const [caregiverName, setCaregiverName] = useState('');
+  const [caregiverPhone, setCaregiverPhone] = useState('');
+  const [dobError, setDobError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const progressPercent = useMemo(() => (1 / 3) * 100, []);
-  const showAgeLabel = ageFocused || age.length > 0;
+  const { goBack, canGoBack, stepInfo } = useOnboardingNav('demographics');
 
-  const desktopBodyHeight = useMemo(() => {
-    const chrome = HEADER_HEIGHT + PROGRESS_HEIGHT + (isWeb ? 0 : 24);
-    return Math.max(height - chrome, 520);
-  }, [height, isWeb]);
+  const majorGroups = useMemo(() => getMajorGroupsForDegree(degree), [degree]);
+
+  const progressPercent = stepInfo.percent;
+
+  const handleDegreeChange = (value: string) => {
+    setDegree(value);
+    if (major && !getMajorOptionsForDegree(value).includes(major)) {
+      setMajor(null);
+    }
+  };
+
+  const handleDobChange = (iso: string) => {
+    const clamped = clampIsoDateToBounds(iso);
+    if (!clamped) {
+      setDateOfBirth(null);
+      setDobError('Please enter a valid calendar date.');
+      return;
+    }
+    setDateOfBirth(clamped);
+    setDobError(validateDateOfBirth(clamped));
+  };
 
   useEffect(() => {
     if (!isWeb || !isDesktop) return;
@@ -118,9 +258,23 @@ export default function DemographicsOnboardingScreen() {
   }, [isWeb, isDesktop]);
 
   const handleContinue = async () => {
-    const ageNum = parseInt(age, 10);
-    if (!age || !Number.isFinite(ageNum) || ageNum < 1 || ageNum > 120) {
-      showToast.error('Validation', 'Please enter a valid age.');
+    const dobValidation = dateOfBirth ? validateDateOfBirth(dateOfBirth) : 'Please select your date of birth.';
+    if (dobValidation) {
+      setDobError(dobValidation);
+      showToast.error('Validation', dobValidation);
+      return;
+    }
+    setDobError(null);
+
+    const degreeValidation = validateDegree(degree);
+    if (degreeValidation) {
+      showToast.error('Validation', degreeValidation);
+      return;
+    }
+
+    const majorValidation = validateMajor(major ?? '', degree);
+    if (majorValidation) {
+      showToast.error('Validation', majorValidation);
       return;
     }
     if (!gender) {
@@ -143,17 +297,24 @@ export default function DemographicsOnboardingScreen() {
     try {
       setSubmitting(true);
       await apiClient.updateOnboardingDemographics({
-        age: ageNum,
-        gender,
-        ethnicity,
-        education_level: EDUCATION_LEVELS[educationIndex],
-        employment_status: employment,
+        date_of_birth: dateOfBirth,
+        gender: toApiGender(gender),
+        ethnicity: toApiEthnicity(ethnicity),
+        education_level: degree,
+        education_major: major!,
+        employment_status: toApiEmployment(employment),
         income_level: income,
+        nationality: nationality.trim() || undefined,
+        marital_status: maritalStatus ?? undefined,
+        caregiver_name: caregiverName.trim() || undefined,
+        caregiver_phone: caregiverPhone.trim() || undefined,
+        preferred_language: preferredLanguage,
         onboarding_completed: false,
       });
       await refreshUser();
-      showToast.success('Profile saved', 'Tell us about your lab results next.');
-      router.replace('/onboarding/lab-choice');
+      showToast.success('Profile saved', 'Next: tell us about your diabetes path.');
+      const user = await authService.getCurrentUser();
+      router.replace(await resolveOnboardingRoute(user));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save demographics.';
       showToast.error('Error', msg);
@@ -171,22 +332,20 @@ export default function DemographicsOnboardingScreen() {
     </View>
   );
 
-  const ageBlock = (
+  const dobBlock = (
     <View style={[styles.section, isDesktop && styles.sectionDesktop]}>
-      <View style={[styles.ageField, isDesktop && styles.ageFieldDesktop, showAgeLabel && styles.ageFieldActive]}>
-        {showAgeLabel ? <Text style={styles.ageLabel}>Age</Text> : null}
-        <TextInput
-          style={[styles.ageInput, showAgeLabel && styles.ageInputFloated, isDesktop && styles.ageInputDesktop]}
-          value={age}
-          onChangeText={setAge}
-          keyboardType="number-pad"
-          placeholder={showAgeLabel ? '' : 'Age'}
-          placeholderTextColor={C.onSurfaceVariant}
-          onFocus={() => setAgeFocused(true)}
-          onBlur={() => setAgeFocused(false)}
-          maxLength={3}
-        />
-      </View>
+      <DatePicker
+        variant="onboarding"
+        label="Date of Birth"
+        value={dateOfBirth}
+        onChange={handleDobChange}
+        placeholder=""
+        hint="Please enter your date of birth"
+        maximumDate={maxDob}
+        minimumDate={minDob}
+        desktop={isDesktop}
+        error={dobError ?? undefined}
+      />
     </View>
   );
 
@@ -260,35 +419,24 @@ export default function DemographicsOnboardingScreen() {
   );
 
   const educationBlock = (
-    <View style={[styles.section, styles.eduSection, isDesktop && styles.sectionDesktop, isDesktop && styles.eduSectionDesktop]}>
-      <View style={styles.eduHeader}>
-        <Text style={[styles.sectionLabel, isDesktop && styles.sectionLabelDesktop]}>Education Level</Text>
-        <View style={[styles.eduBadge, isDesktop && styles.eduBadgeDesktop]}>
-          <Text style={[styles.eduBadgeText, isDesktop && styles.eduBadgeTextDesktop]}>
-            {EDUCATION_LEVELS[educationIndex]}
-          </Text>
-        </View>
-      </View>
-      <View style={[styles.sliderWrap, isDesktop && styles.sliderWrapDesktop]}>
-        <Slider
-          style={[styles.slider, isDesktop && styles.sliderDesktop]}
-          minimumValue={0}
-          maximumValue={4}
-          step={1}
-          value={educationIndex}
-          onValueChange={(v) => setEducationIndex(Math.round(v))}
-          minimumTrackTintColor={C.primary}
-          maximumTrackTintColor={C.sliderTrack}
-          thumbTintColor={C.primary}
-        />
-        <View style={styles.sliderTicks}>
-          {EDUCATION_TICKS.map((tick) => (
-            <Text key={tick} style={[styles.sliderTickText, isDesktop && styles.sliderTickTextDesktop]}>
-              {tick}
-            </Text>
-          ))}
-        </View>
-      </View>
+    <View style={[styles.section, isDesktop && styles.sectionDesktop]}>
+      <SelectField
+        label="Degree"
+        value={degree}
+        options={DEGREE_OPTIONS}
+        onChange={handleDegreeChange}
+        hint="Please select your education degree"
+        desktop={isDesktop}
+      />
+      <SelectField
+        label="Major"
+        value={major}
+        groups={majorGroups}
+        onChange={setMajor}
+        hint="Please select your major or field of study"
+        desktop={isDesktop}
+        menuMaxHeight={isDesktop ? 360 : 400}
+      />
     </View>
   );
 
@@ -328,6 +476,63 @@ export default function DemographicsOnboardingScreen() {
     </View>
   );
 
+  const emrBlock = (
+    <View style={[styles.section, isDesktop && styles.sectionDesktop]}>
+      <Text style={[styles.sectionLabel, isDesktop && styles.sectionLabelDesktop]}>Additional (EMR)</Text>
+      <Text style={styles.fieldHint}>Optional — helps your clinical record.</Text>
+      <Text style={styles.sectionLabel}>Nationality</Text>
+      <TextInput
+        style={styles.textInput}
+        value={nationality}
+        onChangeText={setNationality}
+        placeholder="e.g. Egyptian"
+        placeholderTextColor={C.onSurfaceVariant}
+      />
+      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Marital status</Text>
+      <View style={styles.wrapRow}>
+        {MARITAL_OPTIONS.map((opt) => (
+          <PillChip
+            key={opt.value}
+            label={opt.label}
+            selected={maritalStatus === opt.value}
+            onPress={() => setMaritalStatus(opt.value)}
+            compact
+            desktop={isDesktop}
+          />
+        ))}
+      </View>
+      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Preferred language</Text>
+      <View style={styles.wrapRow}>
+        {LANGUAGE_OPTIONS.map((opt) => (
+          <PillChip
+            key={opt.value}
+            label={opt.label}
+            selected={preferredLanguage === opt.value}
+            onPress={() => setPreferredLanguage(opt.value)}
+            compact
+            desktop={isDesktop}
+          />
+        ))}
+      </View>
+      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Caregiver / emergency contact</Text>
+      <TextInput
+        style={styles.textInput}
+        value={caregiverName}
+        onChangeText={setCaregiverName}
+        placeholder="Name (optional)"
+        placeholderTextColor={C.onSurfaceVariant}
+      />
+      <TextInput
+        style={[styles.textInput, { marginTop: 8 }]}
+        value={caregiverPhone}
+        onChangeText={setCaregiverPhone}
+        placeholder="Phone (optional)"
+        placeholderTextColor={C.onSurfaceVariant}
+        keyboardType="phone-pad"
+      />
+    </View>
+  );
+
   const continueBlock = (
     <Pressable
       style={({ pressed }) => [
@@ -356,12 +561,13 @@ export default function DemographicsOnboardingScreen() {
   const mobileForm = (
     <View style={styles.card}>
       {heroBlock}
-      {ageBlock}
+      {dobBlock}
       {genderBlock}
       {ethnicityBlock}
       {educationBlock}
       {employmentBlock}
       {incomeBlock}
+      {emrBlock}
       {continueBlock}
     </View>
   );
@@ -370,7 +576,7 @@ export default function DemographicsOnboardingScreen() {
     <View style={styles.desktopCard}>
       <View style={styles.desktopCol}>
         {heroBlock}
-        {ageBlock}
+        {dobBlock}
         {genderBlock}
         {ethnicityBlock}
       </View>
@@ -378,6 +584,7 @@ export default function DemographicsOnboardingScreen() {
         {educationBlock}
         {employmentBlock}
         {incomeBlock}
+        {emrBlock}
         {continueBlock}
         {footerBlock}
       </View>
@@ -393,10 +600,14 @@ export default function DemographicsOnboardingScreen() {
         {!isWeb && <BlurView intensity={72} tint="light" style={StyleSheet.absoluteFill} />}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.back()} activeOpacity={0.8}>
-              <ArrowLeft size={22} color={C.primary} strokeWidth={2.5} />
-            </TouchableOpacity>
-            <Text style={styles.stepText}>Step 1 of 3</Text>
+            {canGoBack ? (
+              <TouchableOpacity style={styles.headerIconBtn} onPress={goBack} activeOpacity={0.8}>
+                <ArrowLeft size={22} color={C.primary} strokeWidth={2.5} />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.headerIconBtn} />
+            )}
+            <Text style={styles.stepText}>{stepInfo.label}</Text>
           </View>
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.8}>
             <HelpCircle size={22} color={C.onSurfaceVariant} />
@@ -413,9 +624,14 @@ export default function DemographicsOnboardingScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {isDesktop ? (
-          <View style={[styles.desktopMain, { height: desktopBodyHeight }]}>
+          <ScrollView
+            style={styles.desktopScroll}
+            contentContainerStyle={styles.desktopScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
             {desktopForm}
-          </View>
+          </ScrollView>
         ) : (
           <ScrollView
             contentContainerStyle={styles.scroll}
@@ -480,14 +696,19 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 8,
   },
   scroll: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 48, alignItems: 'center' },
-  desktopMain: {
+  desktopScroll: {
     flex: 1,
     width: '100%',
+    ...(Platform.OS === 'web' ? ({ overflowY: 'auto' } as object) : {}),
+  },
+  desktopScrollContent: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
-    paddingVertical: 12,
-    overflow: 'hidden',
+    paddingTop: 16,
+    paddingBottom: 40,
+    minHeight: '100%',
   },
   card: {
     width: '100%',
@@ -507,7 +728,6 @@ const styles = StyleSheet.create({
   desktopCard: {
     width: '100%',
     maxWidth: 1080,
-    maxHeight: '100%',
     flexDirection: 'row',
     gap: 20,
     backgroundColor: C.surfaceContainerLowest,
@@ -521,11 +741,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 20,
     elevation: 8,
-    overflow: 'hidden',
   },
   desktopCol: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     gap: 10,
     minWidth: 0,
   },
@@ -590,9 +809,75 @@ const styles = StyleSheet.create({
     fontFamily: FONT.bold,
     color: C.primary,
   },
-  ageInput: { ...T.bodyLg, fontFamily: FONT.bold, color: C.onSurface, padding: 0 },
+  ageInput: {
+    ...T.bodyLg,
+    fontFamily: FONT.bold,
+    color: C.onSurface,
+    padding: 0,
+    width: '100%',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
   ageInputDesktop: { fontSize: 16, lineHeight: 22 },
   ageInputFloated: { paddingTop: 2 },
+  selectWrap: { gap: 12, zIndex: 20 },
+  selectField: {
+    minHeight: 56,
+    borderWidth: 2,
+    borderColor: C.surfaceContainerHighest,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: C.surfaceContainerLowest,
+  },
+  selectFieldDesktop: { minHeight: 44 },
+  selectFieldActive: { borderColor: C.primary },
+  selectValue: { ...T.bodyLg, fontFamily: FONT.bold, color: C.onSurface, flex: 1 },
+  selectValueEmpty: { color: C.onSurface },
+  fieldHint: {
+    fontFamily: FONT.medium,
+    fontSize: 13,
+    color: C.onSurfaceVariant,
+    paddingLeft: 4,
+    marginTop: 6,
+  },
+  selectPlaceholder: { color: C.onSurfaceVariant, fontFamily: FONT.medium, fontWeight: '500' },
+  selectMenu: {
+    borderWidth: 2,
+    borderColor: C.surfaceContainerHighest,
+    borderRadius: 16,
+    backgroundColor: C.surfaceContainerLowest,
+    overflow: 'hidden',
+  },
+  selectMenuDesktop: { borderRadius: 14 },
+  selectMenuScroll: {
+    ...(Platform.OS === 'web'
+      ? ({ overflowY: 'auto' } as object)
+      : {}),
+  },
+  selectOption: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: C.surfaceContainer,
+  },
+  selectOptionDesktop: { paddingVertical: 10, paddingHorizontal: 16 },
+  selectOptionGrouped: { paddingLeft: 20 },
+  selectOptionSelected: { backgroundColor: C.primaryFixed },
+  selectOptionText: { ...T.labelMd, fontFamily: FONT.bold, color: C.onSurface },
+  selectOptionTextSelected: { color: C.primary },
+  selectGroupHeader: {
+    ...T.labelSm,
+    fontFamily: FONT.bold,
+    color: C.onSurfaceVariant,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 4,
+    backgroundColor: C.surfaceContainerLow,
+  },
+  selectGroupHeaderDesktop: { paddingHorizontal: 16, paddingTop: 12 },
   genderRow: { flexDirection: 'row', gap: 12 },
   genderIcon: { marginRight: 8 },
   pill: {
@@ -677,34 +962,6 @@ const styles = StyleSheet.create({
   ethnicityText: { ...T.labelMd, fontFamily: FONT.bold, color: C.onSurfaceVariant, textAlign: 'center' },
   ethnicityTextDesktop: { fontSize: 12 },
   ethnicityTextSelected: { color: C.primary },
-  eduSection: { paddingVertical: 8 },
-  eduSectionDesktop: { paddingVertical: 0 },
-  eduHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  eduBadge: {
-    backgroundColor: C.primaryFixed,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  eduBadgeDesktop: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  eduBadgeText: { ...T.labelMd, fontFamily: FONT.bold, color: C.primary },
-  eduBadgeTextDesktop: { fontSize: 12 },
-  sliderWrap: { paddingHorizontal: 8, gap: 16 },
-  sliderWrapDesktop: { gap: 8, paddingHorizontal: 4 },
-  slider: { width: '100%', height: 40 },
-  sliderDesktop: { height: 28 },
-  sliderTicks: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4 },
-  sliderTickText: {
-    ...T.sliderTick,
-    fontFamily: FONT.bold,
-    color: C.onSurfaceVariant,
-    opacity: 0.8,
-    textTransform: 'uppercase',
-  },
-  sliderTickTextDesktop: { fontSize: 9 },
   wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   continueBtn: {
     height: 56,
@@ -751,5 +1008,15 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     paddingHorizontal: 0,
     maxWidth: '100%',
+  },
+  textInput: {
+    borderWidth: 2,
+    borderColor: C.surfaceContainerHighest,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontFamily: FONT.medium,
+    fontSize: 15,
+    color: C.onSurface,
   },
 });

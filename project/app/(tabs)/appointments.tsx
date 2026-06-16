@@ -3,12 +3,14 @@ import { Alert, Linking } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { appointmentsService, Appointment } from '../../services/appointmentsService';
 import { VitalisAppointmentsScreen } from '../../components/vitalis/VitalisAppointmentsScreen';
 import { AppointmentBookingModal } from '../../components/appointments/AppointmentBookingModal';
 
 export default function AppointmentsScreen() {
-  const { isAuthenticated, isLoading: authIsLoading, user, logout } = useAuth();
+  const { isAuthenticated, isLoading: authIsLoading, user } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const router = useRouter();
 
   const [currentSubTab, setCurrentSubTab] = useState<'upcoming' | 'past' | 'canceled' | 'schedule'>('upcoming');
@@ -286,7 +288,7 @@ export default function AppointmentsScreen() {
       error={error}
       onRefresh={handleRefresh}
       onRetry={fetchAppointments}
-      onLogout={logout}
+      onLogout={handleLogout}
       onScheduleNew={openBooking}
       onReschedule={handleReschedule}
       onCancel={handleCancel}
@@ -313,6 +315,11 @@ export default function AppointmentsScreen() {
           onTimeChange={setSelectedTime}
           onReasonChange={setReason}
           onConfirm={handleConfirmBooking}
+          labUploadPending={Boolean(user?.lab_upload_pending)}
+          onUploadLabBeforeAppointment={() => {
+            setBookingVisible(false);
+            router.push('/onboarding/lab-upload' as never);
+          }}
         />
       }
     />

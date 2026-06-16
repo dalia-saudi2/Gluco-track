@@ -4,6 +4,7 @@ import { Download, Calendar, MessageCircle, X, Share } from 'lucide-react-native
 import { useRouter } from 'expo-router';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { recordsService, Report, PatientHistory, Checkup } from '../../services/recordsService';
 import { VitalisRecordsScreen } from '../../components/vitalis/VitalisRecordsScreen';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
@@ -154,7 +155,8 @@ function DetailsModal({
 }
 
 export default function RecordsScreen() {
-  const { isAuthenticated, isLoading: authIsLoading, user, logout } = useAuth();
+  const { isAuthenticated, isLoading: authIsLoading, user } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const router = useRouter();
 
   const [currentSection, setCurrentSection] = useState<'history' | 'checkups' | 'reports'>('history');
@@ -314,8 +316,8 @@ export default function RecordsScreen() {
       error={error}
       onRefresh={handleRefresh}
       onRetry={fetchData}
-      onLogout={logout}
-      onUpload={() => Alert.alert('Upload Record', 'Document upload will be available in a future update.')}
+      onLogout={handleLogout}
+      onUpload={() => router.push('/onboarding/lab-upload' as never)}
       onExportAll={() => Alert.alert('Export', 'Exporting all records...')}
       onViewHistory={(item) => {
         setModalData({ data: item, type: 'history' });

@@ -42,13 +42,12 @@ export const OnboardingTypography = {
 
 export const EDUCATION_LEVELS = [
   'No High School',
-  'High School',
-  "Associate's",
-  "Bachelor's",
-  'Graduate',
+  'High School Diploma',
+  "Associate's Degree",
+  "Bachelor's Degree",
+  "Master's Degree",
+  'Doctorate / Professional',
 ] as const;
-
-export const EDUCATION_TICKS = ['None', 'HS', 'Assoc.', 'Bach.', 'Grad.'] as const;
 
 export const ETHNICITY_OPTIONS = ['Asian', 'Black', 'Hispanic', 'White', 'Other'] as const;
 

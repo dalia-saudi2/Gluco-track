@@ -1,6 +1,40 @@
 import { environmentConfig } from './environment';
 import { authService } from '../services/authService';
 
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item) {
+          const loc = Array.isArray((item as { loc?: unknown }).loc)
+            ? (item as { loc: unknown[] }).loc
+                .filter((part) => part !== 'body')
+                .join(' → ')
+            : '';
+          const msg = String((item as { msg: unknown }).msg);
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        return String(item);
+      })
+      .join('\n');
+  }
+  if (detail && typeof detail === 'object' && 'msg' in detail) {
+    return String((detail as { msg: unknown }).msg);
+  }
+  if (detail == null) {
+    return 'An unexpected error occurred.';
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return 'An unexpected error occurred.';
+  }
+}
+
 // API Configuration
 export const API_CONFIG = {
   BASE_URL: 'http://localhost:8000', // Default, will be overridden by environment config
@@ -115,7 +149,7 @@ export class ApiClient {
 
         try {
           const errorData = JSON.parse(errorText);
-          errorMessage = errorData.detail || errorData.message || errorMessage;
+          errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
         } catch {
           // If parsing fails, use the text as is
           if (errorText) {
@@ -136,6 +170,11 @@ export class ApiClient {
       return response.json();
     } catch (error) {
       if (error instanceof Error) {
+        if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+          throw new Error(
+            'Cannot connect to server. Make sure the backend is running at http://localhost:8000'
+          );
+        }
         throw error;
       }
       throw new Error(`Network error: ${error}`);
@@ -162,13 +201,13 @@ export class ApiClient {
         let errorMessage = `Login failed (${response.status})`;
         try {
           const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.message || errorMessage;
+          errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
         } catch {
           const errorText = await response.text();
           if (errorText) {
             try {
               const errorData = JSON.parse(errorText);
-              errorMessage = errorData.detail || errorData.message || errorMessage;
+              errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
             } catch {
               errorMessage = errorText || errorMessage;
             }
@@ -291,11 +330,18 @@ export class ApiClient {
 
   async updateOnboardingDemographics(data: {
     age?: number;
+    date_of_birth?: string;
     gender?: string;
     ethnicity?: string;
     education_level?: string;
+    education_major?: string;
     employment_status?: string;
     income_level?: string;
+    nationality?: string;
+    marital_status?: string;
+    caregiver_name?: string;
+    caregiver_phone?: string;
+    preferred_language?: string;
     onboarding_completed?: boolean;
   }) {
     return this.request('/users/me/onboarding', {
@@ -304,12 +350,26 @@ export class ApiClient {
     });
   }
 
+  async updateDiabeticPath(isDiabeticPath: boolean) {
+    return this.request('/users/me/onboarding/diabetic-path', {
+      method: 'PATCH',
+      body: JSON.stringify({ is_diabetic_path: isDiabeticPath }),
+    });
+  }
+
+  async updateClinicalProfile(body: Record<string, unknown>) {
+    return this.request('/users/me/clinical-profile', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
   async updateOnboardingLabChoice(hasLabResults: boolean) {
     return this.request('/users/me/onboarding/lab-choice', {
       method: 'PATCH',
       body: JSON.stringify({
         onboarding_lab_opt_in: hasLabResults,
-        onboarding_completed: hasLabResults ? false : true,
+        onboarding_completed: false,
       }),
     });
   }
@@ -401,6 +461,84 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ glucose_readings_mg_dl }),
     });
+  }
+
+  async getOnboardingProgress() {
+    return this.request('/users/me/onboarding/progress');
+  }
+
+  async uploadLabFile(file: Blob | { uri: string; name: string; type: string }) {
+    const url = `${this.baseUrl}/lab-uploads`;
+    const form = new FormData();
+
+    if (typeof Blob !== 'undefined' && file instanceof Blob) {
+      form.append('file', file, 'lab-report');
+    } else {
+      const native = file as { uri: string; name: string; type: string };
+      form.append('file', {
+        uri: native.uri,
+        name: native.name,
+        type: native.type,
+      } as unknown as Blob);
+    }
+
+    if (!this.token) {
+      const storedToken = await authService.getStoredToken();
+      if (storedToken) this.token = storedToken;
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+
+    const response = await fetch(url, { method: 'POST', headers, body: form });
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `Upload failed (${response.status})`;
+      try {
+        const errorData = JSON.parse(errorText);
+        errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
+      } catch {
+        if (errorText) errorMessage = errorText;
+      }
+      throw new Error(errorMessage);
+    }
+    return response.json();
+  }
+
+  async getCurrentLabUpload() {
+    return this.request('/lab-uploads/current');
+  }
+
+  async reviewLabUpload(
+    uploadId: number,
+    body: Record<string, number | boolean | null | undefined>
+  ) {
+    return this.request(`/lab-uploads/${uploadId}/review`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async submitHealthFeatures(body: Record<string, unknown>) {
+    return this.request('/onboarding/health-features', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async completeLabData(body: Record<string, unknown>) {
+    return this.request('/onboarding/complete-lab-data', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getRiskSummary() {
+    return this.request('/users/me/risk-summary');
+  }
+
+  async getAppNotifications() {
+    return this.request('/users/me/notifications');
   }
 }
 

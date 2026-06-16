@@ -34,6 +34,7 @@ import usda_fdc
 import glucose_validation
 import glucose_ml_service
 import dexcom_integration
+from lab_onboarding import router as lab_onboarding_router
 
 # =================================================================
 # GLOBAL API CONFIGURATION
@@ -63,6 +64,8 @@ app.add_middleware(
 
 # Create database tables
 create_tables()
+
+app.include_router(lab_onboarding_router)
 
 # Root endpoint
 @app.get("/")

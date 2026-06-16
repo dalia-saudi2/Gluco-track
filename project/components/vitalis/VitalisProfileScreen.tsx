@@ -41,6 +41,7 @@ import { createDashboardScreenTheme } from '../../hooks/dashboardScreenTheme';
 import { VitalisShell } from './VitalisShell';
 import { DatePicker } from '../DatePicker';
 import { PasswordStrength } from '../PasswordStrength';
+import { ProfileCompletenessCard } from '../profile/ProfileCompletenessCard';
 
 export type ProfileData = {
   name: string;
@@ -105,6 +106,9 @@ type Props = {
   onSavePassword: () => void;
   isChangingPassword?: boolean;
   menuItems: MenuItem[];
+  profileCompletenessPct?: number;
+  labUploadPending?: boolean;
+  onUploadLab?: () => void;
 };
 
 const { ScreenThemeProvider, useScreenTheme } = createDashboardScreenTheme<ReturnType<typeof createStyles>>();
@@ -213,6 +217,9 @@ export function VitalisProfileScreen({
   onSavePassword,
   isChangingPassword,
   menuItems,
+  profileCompletenessPct,
+  labUploadPending,
+  onUploadLab,
 }: Props) {
   const D = useD();
   const s = useMemo(() => StyleSheet.create(createStyles(D)), [D]);
@@ -306,12 +313,21 @@ export function VitalisProfileScreen({
               </CandyCard>
             </View>
 
+            {profileCompletenessPct != null ? (
+              <ProfileCompletenessCard
+                D={D}
+                pct={profileCompletenessPct}
+                labPending={Boolean(labUploadPending)}
+                onUploadLab={onUploadLab}
+              />
+            ) : null}
+
             <View>
               <SectionLabel>Appearance</SectionLabel>
               <CandyCard style={s.sectionCard}>
                 <MenuRow
                   item={{ id: 'theme', label: 'Dark Mode', icon: theme === 'dark' ? Moon : Sun, color: D.orange }}
-                  subtext={theme === 'dark' ? 'On' : 'Off'}
+                  subtext={theme === 'dark' ? 'Yes' : 'No'}
                   right={
                     <Switch
                       value={theme === 'dark'}

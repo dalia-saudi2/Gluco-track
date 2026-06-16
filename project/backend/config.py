@@ -1,18 +1,43 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
+from pathlib import Path
 from typing import List
 import os
 
+BACKEND_DIR = Path(__file__).resolve().parent
+ENV_FILE = BACKEND_DIR / ".env"
+DEFAULT_SQLITE_PATH = BACKEND_DIR / "healthcare.db"
+
+
+def resolve_database_url(url: str) -> str:
+    """Anchor relative SQLite paths to backend/ so cwd does not matter."""
+    if not url.startswith("sqlite"):
+        return url
+    if url.startswith("sqlite:///"):
+        db_path = url[len("sqlite:///") :]
+    elif url.startswith("sqlite://"):
+        db_path = url[len("sqlite://") :]
+    else:
+        return url
+    path = Path(db_path)
+    if not path.is_absolute():
+        path = (BACKEND_DIR / path).resolve()
+    return f"sqlite:///{path.as_posix()}"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
 
-    # Database
-    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./healthcare.db")
+    # Database — always points at project/backend/healthcare.db unless overridden
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        f"sqlite:///{DEFAULT_SQLITE_PATH.as_posix()}",
+    )
     
     # Security
     # CRITICAL: Set SECRET_KEY environment variable in production!
@@ -64,6 +89,7 @@ class Settings(BaseSettings):
     smtp_password: str = os.getenv("SMTP_PASSWORD", "")
 
 settings = Settings()
+settings.database_url = resolve_database_url(settings.database_url)
 
 # Create upload directory if it doesn't exist
 os.makedirs(settings.upload_dir, exist_ok=True)

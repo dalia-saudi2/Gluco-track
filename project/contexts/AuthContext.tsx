@@ -140,14 +140,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      setIsLoading(true);
       await authService.logout();
       setUser(null);
       setIsAuthenticated(false);
     } catch (error) {
       console.error('Logout error:', error);
-    } finally {
-      setIsLoading(false);
+      setUser(null);
+      setIsAuthenticated(false);
     }
   };
 

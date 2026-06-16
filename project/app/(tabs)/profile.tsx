@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Edit3, Bell, Shield, HelpCircle, Settings } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { useTheme } from '../../contexts/ThemeContext';
 import { apiClient } from '../../config/api';
 import { googleAuthService } from '../../services/googleAuthService';
@@ -19,7 +20,8 @@ const menuItems = [
 ];
 
 export default function ProfileScreen() {
-  const { user, isAuthenticated, isLoading: authIsLoading, logout, refreshUser, loginWithGoogle } = useAuth();
+  const { user, isAuthenticated, isLoading: authIsLoading, refreshUser, loginWithGoogle } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
 
@@ -50,6 +52,21 @@ export default function ProfileScreen() {
     new: false,
     confirm: false,
   });
+  const [profileCompletenessPct, setProfileCompletenessPct] = useState<number | undefined>();
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated) return;
+      (async () => {
+        try {
+          const summary = await apiClient.getRiskSummary();
+          setProfileCompletenessPct(summary.profile_completeness_pct);
+        } catch {
+          setProfileCompletenessPct(undefined);
+        }
+      })();
+    }, [isAuthenticated])
+  );
 
   const mockProfileData = {
     name: 'User',
@@ -235,24 +252,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      } else {
-        router.replace('/login');
-      }
-    } catch (err) {
-      console.error('Logout error:', err);
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      } else {
-        router.replace('/login');
-      }
-    }
-  };
-
   const closePasswordModal = () => {
     setPasswordModalVisible(false);
     setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -292,6 +291,9 @@ export default function ProfileScreen() {
       onSavePassword={handleSavePassword}
       isChangingPassword={isChangingPassword}
       menuItems={menuItems}
+      profileCompletenessPct={profileCompletenessPct}
+      labUploadPending={user?.lab_upload_pending}
+      onUploadLab={() => router.push('/onboarding/lab-upload' as never)}
     />
   );
 }

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Healthcare Platform — Feature Groups ERD</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #fef7ff;
+      color: #2e1a28;
+    }
+    header {
+      padding: 20px 28px;
+      background: #fff;
+      border-bottom: 1px solid rgba(224,64,160,0.15);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.35rem; color: #e040a0; }
+    .sub { font-size: 0.9rem; color: #604868; }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .g1 { background: rgba(224,64,160,0.12); color: #c2185b; }
+    .g2 { background: rgba(124,82,170,0.12); color: #7c52aa; }
+    .g3 { background: rgba(0,150,204,0.12); color: #0096cc; }
+    .g4 { background: rgba(234,88,12,0.12); color: #ea580c; }
+    .g5 { background: rgba(22,163,74,0.12); color: #16a34a; }
+    main { padding: 24px; overflow-x: auto; }
+    .mermaid { background: #fff; border-radius: 16px; padding: 20px; border: 1px solid rgba(0,0,0,0.06); }
+    section { margin-top: 32px; max-width: 1100px; }
+    h2 { font-size: 1rem; color: #7c52aa; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; border-radius: 12px; overflow: hidden; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #f2e8f2; text-align: left; }
+    th { background: #f8eef8; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #604868; }
+    tr:hover td { background: #fbf2fb; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Healthcare Platform — 5 Feature Collection Groups</h1>
+    <p class="sub">PostgreSQL: <code>patients</code> + <code>patient_clinical_profile</code> + <code>patient_measurements</code> · Dev SQLite maps <code>patients</code> → <code>users</code></p>
+    <div class="legend">
+      <span class="pill g1">Group 1 Demographics</span>
+      <span class="pill g2">Group 2 Clinical profile</span>
+      <span class="pill g3">Group 3 Lifestyle</span>
+      <span class="pill g4">Group 4 Home measurements</span>
+      <span class="pill g5">Group 5 Lab results</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="mermaid">
+erDiagram
+    users ||--o| patients : "auth"
+    patients ||--o| patient_clinical_profile : "1-to-1"
+    patients ||--o{ patient_measurements : "has many"
+    patients ||--o{ lab_uploads : "uploads"
+    patient_measurements }o--o| lab_uploads : "source"
+    patients ||--o{ predictions : "risk scores"
+
+    patients {
+        uuid id PK
+        uuid user_id FK
+        date date_of_birth
+        smallint age "G1 model snapshot 20-79"
+        enum gender "G1 male|female"
+        enum ethnicity "G1"
+        smallint education_level "G1 0-4"
+        enum employment_status "G1"
+        smallint income_level "G1 0-3"
+        varchar nationality "EMR"
+        enum marital_status "EMR"
+        varchar caregiver_name "EMR"
+        varchar caregiver_phone "EMR"
+        enum preferred_language "ar|en"
+        boolean lab_upload_pending
+        boolean onboarding_complete
+    }
+
+    patient_clinical_profile {
+        uuid id PK
+        uuid patient_id FK UK
+        enum diabetes_type "G2 type1|type2|unknown"
+        smallint year_of_diagnosis "G2"
+        smallint years_since_diagnosis "G2 GENERATED"
+        boolean on_insulin "G2 comp model"
+        enum insulin_regimen "EMR"
+        boolean on_sglt2i "G2 comp model"
+        boolean on_metformin "EMR"
+        boolean on_statin "EMR"
+        boolean on_antihypertensive "EMR"
+        text medication_list "EMR"
+        date last_eye_exam_date "EMR"
+        date last_kidney_function_date "EMR"
+        date last_foot_exam_date "EMR"
+    }
+
+    patient_measurements {
+        uuid id PK
+        uuid patient_id FK
+        enum source "manual|manual_partial|ocr"
+        boolean lab_data_complete
+        smallint age
+        enum smoking_status "G3"
+        enum alcohol_group "G3"
+        smallint physical_activity_minutes "G3"
+        enum activity_level "G3 GENERATED"
+        decimal sleep_hours_per_day "G3"
+        decimal screen_time_hours_per_day "G3"
+        smallint years_since_quit "EMR"
+        smallint cigarettes_per_day "EMR"
+        enum diet_quality "EMR"
+        smallint stress_level "EMR 1-5"
+        int steps_per_day "EMR wearable"
+        decimal weight_kg "G4"
+        decimal height_cm "G4"
+        decimal bmi "G4 GENERATED"
+        enum bmi_group "G4 GENERATED"
+        smallint systolic_bp "G4"
+        smallint diastolic_bp "optional"
+        smallint heart_rate "optional"
+        decimal waist_cm "G4"
+        decimal hip_cm "G4"
+        decimal waist_to_hip_ratio "G4 GENERATED"
+        boolean abdominal_obesity "G4 GENERATED"
+        boolean family_history_diabetes
+        boolean hypertension_history "G2+staging"
+        boolean cardiovascular_history
+        decimal hba1c "G5 comp only"
+        smallint ldl_cholesterol "G5"
+        smallint hdl_cholesterol "G5"
+        smallint triglycerides "G5"
+        decimal hematocrit "G5 comp"
+        smallint cholesterol_total "EMR optional"
+        decimal fasting_glucose "EMR"
+        decimal creatinine "EMR"
+        decimal egfr "EMR GENERATED"
+        decimal urine_acr "EMR"
+        boolean is_current
+        timestamptz measured_at
+    }
+
+    lab_uploads {
+        uuid id PK
+        uuid patient_id FK
+        varchar file_url
+        enum ocr_status
+        jsonb ocr_extracted_values
+        boolean review_confirmed
+    }
+
+    predictions {
+        uuid id PK
+        uuid patient_id FK
+        uuid measurement_id FK
+        decimal diabetes_risk_score
+        boolean is_estimated
+        smallint features_used
+        smallint features_total
+    }
+    </div>
+
+    <section>
+      <h2>Onboarding screen flow</h2>
+      <table>
+        <tr><th>Screen</th><th>Groups collected</th><th>Tables written</th></tr>
+        <tr><td>2 Demographics</td><td>G1</td><td>patients</td></tr>
+        <tr><td>3 Diabetic?</td><td>path flag</td><td>patients.is_diabetic_path</td></tr>
+        <tr><td>4A Clinical facts</td><td>G2</td><td>patient_clinical_profile</td></tr>
+        <tr><td>5 Lifestyle</td><td>G3</td><td>patient_measurements</td></tr>
+        <tr><td>6 Home measurements</td><td>G4</td><td>patient_measurements</td></tr>
+        <tr><td>7 Lab choice → OCR or skip</td><td>G5 or partial</td><td>lab_uploads + patient_measurements</td></tr>
+        <tr><td>8 Prediction</td><td>—</td><td>predictions</td></tr>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'neutral', er: { layoutDirection: 'TB' } });
+  </script>
+</body>
+</html>

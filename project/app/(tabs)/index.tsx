@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { dashboardService } from '../../services/dashboardService';
 import { VitalisDashboard, type VitalisDashboardProps } from '../../components/dashboard/VitalisDashboard';
 
@@ -13,6 +14,7 @@ function mapMedStatus(index: number, isOverdue?: boolean): 'taken' | 'missed' | 
 
 export default function DashboardScreen() {
   const { isAuthenticated, user } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const [loading, setLoading] = useState(true);
   const [props, setProps] = useState<Partial<VitalisDashboardProps>>({});
 
@@ -87,6 +89,7 @@ export default function DashboardScreen() {
       medications={props.medications}
       nextAppointment={props.nextAppointment}
       labResults={props.labResults}
+      onLogout={handleLogout}
     />
   );
 }

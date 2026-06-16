@@ -27,6 +27,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { showToast } from '../components/ToastProvider';
 import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
+import { AuthTextField } from '../components/auth/AuthTextField';
+import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
+import { authService } from '../services/authService';
 
 const SPLIT_BREAKPOINT = 900;
 
@@ -43,6 +46,8 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [pwFocused, setPwFocused] = useState(false);
+  const [confirmFocused, setConfirmFocused] = useState(false);
 
   const handleRegister = async () => {
     if (!name.trim() || !phone.trim() || !email.trim() || !password) {
@@ -70,7 +75,8 @@ export default function RegisterScreen() {
       });
 
       showToast.success('Account Created', 'Welcome! Complete your profile next.');
-      router.replace('/onboarding/demographics');
+      const user = await authService.getCurrentUser();
+      router.replace(await resolveOnboardingRoute(user));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'An error occurred';
       showToast.error('Registration Failed', msg);
@@ -113,54 +119,44 @@ export default function RegisterScreen() {
 
             <View style={styles.card}>
               <Text style={styles.label}>Name</Text>
-              <View style={styles.inputWrap}>
-                <User size={18} color={C.primary} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Full name"
-                  placeholderTextColor={C.onSurfaceVariant}
-                  value={name}
-                  onChangeText={setName}
-                />
-              </View>
+              <AuthTextField
+                icon={<User size={18} color={C.primary} />}
+                idlePlaceholder="Full name"
+                value={name}
+                onChangeText={setName}
+              />
 
               <Text style={styles.label}>Phone Number</Text>
-              <View style={styles.inputWrap}>
-                <Phone size={18} color={C.primary} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Mobile number"
-                  placeholderTextColor={C.onSurfaceVariant}
-                  keyboardType="phone-pad"
-                  value={phone}
-                  onChangeText={setPhone}
-                />
-              </View>
+              <AuthTextField
+                icon={<Phone size={18} color={C.primary} />}
+                idlePlaceholder="Mobile number"
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={setPhone}
+              />
 
               <Text style={styles.label}>Email</Text>
-              <View style={styles.inputWrap}>
-                <Mail size={18} color={C.primary} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email address"
-                  placeholderTextColor={C.onSurfaceVariant}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={email}
-                  onChangeText={setEmail}
-                />
-              </View>
+              <AuthTextField
+                icon={<Mail size={18} color={C.primary} />}
+                idlePlaceholder="Email address"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={email}
+                onChangeText={setEmail}
+              />
 
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputWrap}>
                 <Lock size={18} color={C.primary} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Create password"
+                  placeholder={pwFocused || password ? '' : 'Create password'}
                   placeholderTextColor={C.onSurfaceVariant}
                   secureTextEntry={!showPassword}
                   value={password}
                   onChangeText={setPassword}
+                  onFocus={() => setPwFocused(true)}
+                  onBlur={() => setPwFocused(false)}
                 />
                 <Pressable onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
                   {showPassword ? (
@@ -176,11 +172,13 @@ export default function RegisterScreen() {
                 <Lock size={18} color={C.primary} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Confirm password"
+                  placeholder={confirmFocused || confirmPassword ? '' : 'Confirm password'}
                   placeholderTextColor={C.onSurfaceVariant}
                   secureTextEntry={!showPassword}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
+                  onFocus={() => setConfirmFocused(true)}
+                  onBlur={() => setConfirmFocused(false)}
                 />
               </View>
 

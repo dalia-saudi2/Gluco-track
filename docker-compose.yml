@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: healthcare_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: healthcare
+      POSTGRES_PASSWORD: healthcare_dev
+      POSTGRES_DB: healthcare
+    ports:
+      - "5432:5432"
+    volumes:
+      - healthcare_pg_data:/var/lib/postgresql/data
+      - ./project/backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthcare -d healthcare"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  healthcare_pg_data:

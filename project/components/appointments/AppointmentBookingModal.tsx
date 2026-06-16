@@ -36,6 +36,8 @@ type Props = {
   onTimeChange: (time: string) => void;
   onReasonChange: (reason: string) => void;
   onConfirm: () => Promise<void>;
+  labUploadPending?: boolean;
+  onUploadLabBeforeAppointment?: () => void;
 };
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
@@ -67,6 +69,8 @@ export function AppointmentBookingModal({
   onTimeChange,
   onReasonChange,
   onConfirm,
+  labUploadPending,
+  onUploadLabBeforeAppointment,
 }: Props) {
   const validateFutureDate = () => {
     const selected = new Date(selectedDate);
@@ -228,6 +232,23 @@ export function AppointmentBookingModal({
             <View style={s.modalBody}>
               <WizardProgress step={4} />
               <Text style={s.stepTitle}>Confirm Details</Text>
+              {labUploadPending ? (
+                <View style={s.labNudge}>
+                  <Text style={s.labNudgeTitle}>Before your appointment</Text>
+                  <Text style={s.labNudgeBody}>
+                    {selectedProvider} will have a better picture of your health if you upload your lab results
+                    first.
+                  </Text>
+                  <View style={s.labNudgeActions}>
+                    <TouchableOpacity
+                      style={s.labNudgePrimary}
+                      onPress={onUploadLabBeforeAppointment}
+                    >
+                      <Text style={s.labNudgePrimaryText}>Upload results before appointment</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
               <View style={s.confirmBox}>
                 <SummaryRow label="Doctor" value={selectedProvider} />
                 <SummaryRow label="Specialty" value={selectedSpecialty} />
@@ -304,6 +325,25 @@ const s = StyleSheet.create({
   },
   modalTitle: { fontFamily: DF.bold, fontSize: 18, color: D.onSurface },
   modalBody: { padding: 20, gap: 12 },
+  labNudge: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.35)',
+    gap: 8,
+  },
+  labNudgeTitle: { fontFamily: DF.bold, fontSize: 13, color: '#b45309' },
+  labNudgeBody: { fontFamily: DF.medium, fontSize: 12, color: D.onSurfaceVariant, lineHeight: 17 },
+  labNudgeActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  labNudgePrimary: {
+    flex: 1,
+    backgroundColor: '#d97706',
+    paddingVertical: 10,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  labNudgePrimaryText: { fontFamily: DF.bold, fontSize: 11, color: '#fff' },
   wizardProgress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   progressStep: {
     width: 28,

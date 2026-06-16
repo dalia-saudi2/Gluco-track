@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Modal,
   ScrollView,
   Platform,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { X, LogOut } from 'lucide-react-native';
@@ -22,6 +23,10 @@ type Props = {
   onLogout?: () => void;
 };
 
+/** Shared compact desktop sidebar dimensions */
+export const SIDEBAR_WIDTH = 200;
+const DRAWER_WIDTH = 220;
+
 export function MobileNavDrawer({
   visible,
   onClose,
@@ -32,6 +37,20 @@ export function MobileNavDrawer({
   const router = useRouter();
   const D = useD();
   const styles = useDashboardStyles(createDrawerStyles);
+  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 260,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      slideAnim.setValue(-DRAWER_WIDTH);
+    }
+  }, [visible, slideAnim]);
+
   const firstName = userName.split(' ')[0] || userName;
   const initials = userName
     .split(' ')
@@ -48,8 +67,7 @@ export function MobileNavDrawer({
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close menu" />
-        <View style={styles.drawer}>
+        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
           <View style={styles.drawerHead}>
             <DiabetesCareHubBrand compact />
             <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
@@ -93,14 +111,12 @@ export function MobileNavDrawer({
               </Pressable>
             )}
           </View>
-        </View>
+        </Animated.View>
+        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close menu" />
       </View>
     </Modal>
   );
 }
-
-/** Shared compact desktop sidebar dimensions */
-export const SIDEBAR_WIDTH = 200;
 
 export function createSidebarStyles(D: DashboardPalette) {
   return {
@@ -145,7 +161,7 @@ function createDrawerStyles(D: DashboardPalette) {
     backdrop: { flex: 1, flexDirection: 'row' as const },
     scrim: { flex: 1, backgroundColor: D.scrim },
     drawer: {
-      width: 220,
+      width: DRAWER_WIDTH,
       backgroundColor: D.surface,
       borderRightWidth: 1,
       borderRightColor: D.borderSubtle,

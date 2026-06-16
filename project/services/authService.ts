@@ -21,10 +21,19 @@ export interface User {
   age?: number | null;
   ethnicity?: string | null;
   education_level?: string | null;
+  education_major?: string | null;
   employment_status?: string | null;
   income_level?: string | null;
   onboarding_completed?: boolean;
   onboarding_lab_opt_in?: boolean | null;
+  lab_upload_pending?: boolean;
+  gender?: string | null;
+  is_diabetic_path?: boolean | null;
+  nationality?: string | null;
+  marital_status?: string | null;
+  caregiver_name?: string | null;
+  caregiver_phone?: string | null;
+  preferred_language?: string | null;
 }
 
 export interface AuthResponse {

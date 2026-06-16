@@ -1,7 +1,14 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
+
+from onboarding_validation import (
+    validate_date_of_birth,
+    validate_degree,
+    validate_major,
+    coerce_date_of_birth,
+)
 
 # Enums
 class AppointmentStatus(str, Enum):
@@ -36,10 +43,18 @@ class UserBase(BaseModel):
     age: Optional[int] = None
     ethnicity: Optional[str] = None
     education_level: Optional[str] = None
+    education_major: Optional[str] = None
     employment_status: Optional[str] = None
     income_level: Optional[str] = None
     onboarding_completed: Optional[bool] = False
     onboarding_lab_opt_in: Optional[bool] = None
+    lab_upload_pending: Optional[bool] = False
+    is_diabetic_path: Optional[bool] = None
+    nationality: Optional[str] = None
+    marital_status: Optional[str] = None
+    caregiver_name: Optional[str] = None
+    caregiver_phone: Optional[str] = None
+    preferred_language: Optional[str] = None
     isf_mg_dl_per_unit: Optional[float] = None
     icr_grams_per_unit: Optional[float] = None
     # OAuth fields (read-only in responses)
@@ -60,24 +75,80 @@ class UserUpdate(BaseModel):
     age: Optional[int] = None
     ethnicity: Optional[str] = None
     education_level: Optional[str] = None
+    education_major: Optional[str] = None
     employment_status: Optional[str] = None
     income_level: Optional[str] = None
     onboarding_completed: Optional[bool] = None
+
+    @field_validator('date_of_birth', mode='before')
+    @classmethod
+    def parse_date_of_birth(cls, value):
+        return coerce_date_of_birth(value)
 
 
 class OnboardingDemographicsUpdate(BaseModel):
     age: Optional[int] = None
+    date_of_birth: Optional[datetime] = None
     gender: Optional[str] = None
     ethnicity: Optional[str] = None
     education_level: Optional[str] = None
+    education_major: Optional[str] = None
     employment_status: Optional[str] = None
     income_level: Optional[str] = None
+    nationality: Optional[str] = None
+    marital_status: Optional[str] = None
+    caregiver_name: Optional[str] = None
+    caregiver_phone: Optional[str] = None
+    preferred_language: Optional[str] = None
     onboarding_completed: Optional[bool] = None
+
+    @field_validator('date_of_birth', mode='before')
+    @classmethod
+    def parse_date_of_birth(cls, value):
+        return coerce_date_of_birth(value)
+
+    @field_validator('education_level')
+    @classmethod
+    def check_education_level(cls, value: Optional[str]) -> Optional[str]:
+        validate_degree(value)
+        return value
+
+    @field_validator('education_major')
+    @classmethod
+    def normalize_education_major(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return value.strip()
+
+    @model_validator(mode='after')
+    def check_major_for_degree(self):
+        validate_major(self.education_major, self.education_level)
+        return self
 
 
 class OnboardingLabChoiceUpdate(BaseModel):
     onboarding_lab_opt_in: bool
     onboarding_completed: Optional[bool] = None
+
+
+class DiabeticPathUpdate(BaseModel):
+    is_diabetic_path: bool
+
+
+class ClinicalProfileUpdate(BaseModel):
+    diabetes_type: Optional[str] = None
+    year_of_diagnosis: Optional[int] = None
+    on_insulin: Optional[bool] = None
+    insulin_regimen: Optional[str] = None
+    on_sglt2i: Optional[bool] = None
+    on_metformin: Optional[bool] = None
+    on_statin: Optional[bool] = None
+    on_antihypertensive: Optional[bool] = None
+    medication_list: Optional[str] = None
+    last_eye_exam_date: Optional[datetime] = None
+    last_kidney_function_date: Optional[datetime] = None
+    last_foot_exam_date: Optional[datetime] = None
+    hypertension_history: Optional[bool] = None
 
 
 class OnboardingCompleteUpdate(BaseModel):
@@ -322,3 +393,137 @@ class DashboardData(BaseModel):
     current_medications: List[Medication]
     unread_messages: int
     health_metrics: dict
+
+
+# Lab OCR & health features onboarding
+class LabFieldValue(BaseModel):
+    value: Optional[float] = None
+    confidence: float = 0.0
+    status: str = "missing"  # ok, low, missing
+
+
+class LabUploadResponse(BaseModel):
+    id: int
+    patient_id: int
+    file_url: str
+    file_type: str
+    file_size_kb: Optional[int] = None
+    ocr_status: str
+    ocr_extracted_values: Optional[dict] = None
+    ocr_confidence_score: Optional[float] = None
+    manually_corrected: bool = False
+    review_confirmed: bool = False
+    uploaded_at: datetime
+    processed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LabUploadReviewUpdate(BaseModel):
+    cholesterol_total: Optional[int] = None
+    ldl_cholesterol: Optional[int] = None
+    hdl_cholesterol: Optional[int] = None
+    triglycerides: Optional[int] = None
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    heart_rate: Optional[int] = None
+    review_confirmed: bool = True
+
+
+class OnboardingProgress(BaseModel):
+    demographics_done: bool
+    diabetic_path_done: bool = False
+    clinical_profile_done: bool = False
+    lab_opt_in: Optional[bool] = None
+    lab_upload_id: Optional[int] = None
+    lab_review_done: bool = False
+    health_features_done: bool = False
+    onboarding_completed: bool = False
+
+
+class HealthFeaturesCreate(BaseModel):
+    partial: bool = False
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    heart_rate: Optional[int] = None
+    cholesterol_total: Optional[int] = None
+    ldl_cholesterol: Optional[int] = None
+    hdl_cholesterol: Optional[int] = None
+    triglycerides: Optional[int] = None
+    smoking_status: str
+    alcohol_group: str
+    physical_activity_minutes: int
+    sleep_hours_per_day: float
+    screen_time_hours_per_day: float
+    family_history_diabetes: bool
+    hypertension_history: bool
+    cardiovascular_history: bool
+    height_cm: float
+    weight_kg: float
+    waist_cm: float
+    hip_cm: float
+    years_since_quit: Optional[int] = None
+    cigarettes_per_day: Optional[int] = None
+    diet_quality: Optional[str] = None
+    stress_level: Optional[int] = None
+    hba1c: Optional[float] = None
+    hematocrit: Optional[float] = None
+    source_lab_upload_id: Optional[int] = None
+
+
+class CompleteLabDataCreate(BaseModel):
+    systolic_bp: int
+    diastolic_bp: int
+    heart_rate: int
+    cholesterol_total: Optional[int] = None
+    ldl_cholesterol: Optional[int] = None
+    hdl_cholesterol: Optional[int] = None
+    triglycerides: Optional[int] = None
+    source_lab_upload_id: Optional[int] = None
+
+
+class DiabetesPredictionResponse(BaseModel):
+    id: int
+    diabetes_stage: int
+    diabetes_stage_label: Optional[str] = None
+    diabetes_risk_score: float
+    diagnosed_diabetes: bool
+    retinopathy_risk: float
+    nephropathy_risk: float
+    neuropathy_risk: float
+    staging_confidence: Optional[float] = None
+    risk_score_confidence: Optional[float] = None
+    triggered_by: str
+    model_name: Optional[str] = None
+    is_estimated: bool = False
+    features_used: Optional[int] = None
+    features_total: Optional[int] = 25
+    imputed_features: Optional[list] = None
+    predicted_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HealthFeaturesResponse(BaseModel):
+    measurement_id: int
+    prediction: DiabetesPredictionResponse
+    onboarding_completed: bool = True
+    lab_upload_pending: bool = False
+    profile_completeness_pct: Optional[int] = None
+
+
+class RiskSummary(BaseModel):
+    risk_score: float
+    is_estimated: bool
+    diabetes_stage: int
+    diabetes_stage_label: str
+    features_used: int
+    features_total: int
+    lab_upload_pending: bool
+    lab_data_complete: bool
+    profile_completeness_pct: int
+    feature_pills: dict
+    account_age_days: int = 0
+

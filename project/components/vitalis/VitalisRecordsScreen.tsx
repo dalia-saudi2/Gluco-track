@@ -525,7 +525,7 @@ export function VitalisRecordsScreen({
           </View>
           <Pressable style={s.uploadBtn} onPress={onUpload}>
             <Upload size={16} color={D.onPrimary} />
-            <Text style={s.uploadBtnText}>Upload Record</Text>
+            <Text style={s.uploadBtnText}>Upload Lab Test</Text>
           </Pressable>
         </View>
 

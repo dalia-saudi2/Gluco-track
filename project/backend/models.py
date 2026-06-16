@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON, Computed
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -29,10 +29,18 @@ class User(Base):
     age = Column(Integer, nullable=True)
     ethnicity = Column(String, nullable=True)
     education_level = Column(String, nullable=True)
+    education_major = Column(String, nullable=True)
     employment_status = Column(String, nullable=True)
     income_level = Column(String, nullable=True)
+    nationality = Column(String, nullable=True)
+    marital_status = Column(String, nullable=True)
+    caregiver_name = Column(String, nullable=True)
+    caregiver_phone = Column(String, nullable=True)
+    preferred_language = Column(String, default="en")
+    is_diabetic_path = Column(Boolean, nullable=True)
     onboarding_completed = Column(Boolean, default=False)
     onboarding_lab_opt_in = Column(Boolean, nullable=True)
+    lab_upload_pending = Column(Boolean, default=False)
     # Personalized insulin therapy parameters (mg/dL per unit; grams carb per unit)
     isf_mg_dl_per_unit = Column(Float, nullable=True)
     icr_grams_per_unit = Column(Float, nullable=True)
@@ -46,6 +54,34 @@ class User(Base):
     medical_records = relationship("MedicalRecord", back_populates="patient")
     medications = relationship("Medication", back_populates="patient")
     messages = relationship("Message", back_populates="patient")
+    patient_profile = relationship("Patient", back_populates="user", uselist=False)
+
+
+class Patient(Base):
+    """Group 1 — demographics & identity (1:1 with users; same integer id in dev SQLite)."""
+    __tablename__ = "patients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    date_of_birth = Column(DateTime, nullable=True)
+    age = Column(Integer, nullable=False)
+    gender = Column(String, nullable=False)
+    ethnicity = Column(String, nullable=False)
+    education_level = Column(Integer, nullable=False)
+    employment_status = Column(String, nullable=False)
+    income_level = Column(Integer, nullable=False)
+    nationality = Column(String, nullable=True)
+    marital_status = Column(String, nullable=True)
+    caregiver_name = Column(String, nullable=True)
+    caregiver_phone = Column(String, nullable=True)
+    preferred_language = Column(String, default="en")
+    is_diabetic_path = Column(Boolean, nullable=True)
+    lab_upload_pending = Column(Boolean, default=False)
+    onboarding_complete = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", back_populates="patient_profile")
 
 class Appointment(Base):
     """Stores scheduled medical visits between patients and doctors."""
@@ -147,3 +183,178 @@ class ChatMessage(Base):
     
     # Relationships
     session = relationship("ChatSession")
+
+
+class LabUpload(Base):
+    __tablename__ = "lab_uploads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    file_url = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)  # jpeg, png, pdf
+    file_size_kb = Column(Integer, nullable=True)
+    ocr_status = Column(String, default="pending")  # pending, processing, success, partial, failed
+    ocr_raw_output = Column(JSON, nullable=True)
+    ocr_extracted_values = Column(JSON, nullable=True)
+    ocr_confidence_score = Column(Float, nullable=True)
+    manually_corrected = Column(Boolean, default=False)
+    review_confirmed = Column(Boolean, default=False)
+    lab_date = Column(DateTime, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+    patient = relationship("User", backref="lab_uploads")
+
+
+class PatientMeasurement(Base):
+    __tablename__ = "patient_measurements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
+    source = Column(String, default="manual")
+    source_lab_upload_id = Column(Integer, ForeignKey("lab_uploads.id"), nullable=True)
+    lab_data_complete = Column(Boolean, default=True)
+    is_current = Column(Boolean, default=True)
+    age = Column(Integer, nullable=False)
+    weight_kg = Column(Float, nullable=False)
+    height_cm = Column(Float, nullable=False)
+    bmi = Column(
+        Float,
+        Computed("ROUND(weight_kg / ((height_cm / 100.0) * (height_cm / 100.0)), 2)", persisted=True),
+        nullable=False,
+    )
+    bmi_group = Column(
+        String,
+        Computed(
+            "CASE "
+            "WHEN (weight_kg / ((height_cm / 100.0) * (height_cm / 100.0))) < 18.5 THEN 'underweight' "
+            "WHEN (weight_kg / ((height_cm / 100.0) * (height_cm / 100.0))) < 25 THEN 'normal' "
+            "WHEN (weight_kg / ((height_cm / 100.0) * (height_cm / 100.0))) < 30 THEN 'overweight' "
+            "ELSE 'obese' END",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+    waist_cm = Column(Float, nullable=False)
+    hip_cm = Column(Float, nullable=False)
+    waist_to_hip_ratio = Column(
+        Float,
+        Computed("ROUND(waist_cm / hip_cm, 3)", persisted=True),
+        nullable=False,
+    )
+    abdominal_obesity = Column(Boolean, default=False)
+    systolic_bp = Column(Integer, nullable=True)
+    diastolic_bp = Column(Integer, nullable=True)
+    heart_rate = Column(Integer, nullable=True)
+    smoking_status = Column(String, nullable=False)
+    years_since_quit = Column(Integer, nullable=True)
+    cigarettes_per_day = Column(Integer, nullable=True)
+    alcohol_group = Column(String, nullable=False)
+    physical_activity_minutes = Column(Integer, nullable=False)
+    activity_level = Column(
+        String,
+        Computed(
+            "CASE "
+            "WHEN physical_activity_minutes = 0 THEN 'sedentary' "
+            "WHEN physical_activity_minutes < 90 THEN 'light' "
+            "WHEN physical_activity_minutes < 210 THEN 'moderate' "
+            "ELSE 'active' END",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+    sleep_hours_per_day = Column(Float, nullable=False)
+    screen_time_hours_per_day = Column(Float, nullable=False)
+    diet_quality = Column(String, nullable=True)
+    stress_level = Column(Integer, nullable=True)
+    steps_per_day = Column(Integer, nullable=True)
+    family_history_diabetes = Column(Boolean, nullable=False)
+    hypertension_history = Column(Boolean, nullable=False)
+    cardiovascular_history = Column(Boolean, nullable=False)
+    cholesterol_total = Column(Integer, nullable=True)
+    ldl_cholesterol = Column(Integer, nullable=True)
+    hdl_cholesterol = Column(Integer, nullable=True)
+    triglycerides = Column(Integer, nullable=True)
+    hba1c = Column(Float, nullable=True)
+    hematocrit = Column(Float, nullable=True)
+    fasting_glucose = Column(Float, nullable=True)
+    creatinine = Column(Float, nullable=True)
+    egfr = Column(Float, nullable=True)
+    urine_acr = Column(Float, nullable=True)
+    alt = Column(Float, nullable=True)
+    tsh = Column(Float, nullable=True)
+    measured_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("Patient", backref="patient_measurements")
+    lab_upload = relationship("LabUpload")
+
+
+class PatientClinicalProfile(Base):
+    """Group 2 — diabetes-specific clinical facts (1:1 with patient/user)."""
+    __tablename__ = "patient_clinical_profile"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    diabetes_type = Column(String, nullable=True)  # type1, type2, unknown
+    year_of_diagnosis = Column(Integer, nullable=True)
+    years_since_diagnosis = Column(Integer, nullable=True)
+    on_insulin = Column(Boolean, nullable=True)
+    insulin_regimen = Column(String, nullable=True)  # basal, basal_bolus, pump
+    on_sglt2i = Column(Boolean, nullable=True)
+    on_metformin = Column(Boolean, nullable=True)
+    on_statin = Column(Boolean, nullable=True)
+    on_antihypertensive = Column(Boolean, nullable=True)
+    medication_list = Column(Text, nullable=True)
+    last_eye_exam_date = Column(DateTime, nullable=True)
+    last_kidney_function_date = Column(DateTime, nullable=True)
+    last_foot_exam_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    patient = relationship("User", backref="clinical_profile", uselist=False)
+
+
+class DiabetesPrediction(Base):
+    __tablename__ = "predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    measurement_id = Column(Integer, ForeignKey("patient_measurements.id"), nullable=False)
+    diabetes_stage = Column(Integer, nullable=False)
+    diabetes_risk_score = Column(Float, nullable=False)
+    diagnosed_diabetes = Column(Boolean, default=False)
+    retinopathy_risk = Column(Float, nullable=False)
+    nephropathy_risk = Column(Float, nullable=False)
+    neuropathy_risk = Column(Float, nullable=False)
+    feature_importances = Column(JSON, nullable=True)
+    staging_confidence = Column(Float, nullable=True)
+    risk_score_confidence = Column(Float, nullable=True)
+    triggered_by = Column(String, default="onboarding")
+    model_name = Column(String, nullable=True)
+    is_estimated = Column(Boolean, default=False)
+    features_used = Column(Integer, nullable=True)
+    features_total = Column(Integer, default=25)
+    imputed_features = Column(JSON, nullable=True)
+    predicted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("User", backref="predictions")
+    measurement = relationship("PatientMeasurement")
+
+
+class AppNotification(Base):
+    __tablename__ = "app_notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    notification_type = Column(String, nullable=False)
+    channel = Column(String, default="push")
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    scheduled_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    cancelled = Column(Boolean, default=False)
+    pinned = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("User", backref="app_notifications")

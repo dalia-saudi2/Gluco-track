@@ -27,6 +27,7 @@ import {
 } from 'lucide-react-native';
 import { groqChat, groqSuggestions } from '../../config/llm';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { chatbotService } from '../../services/chatbotService';
 import { VitalisShell } from '../../components/vitalis/VitalisShell';
 import { CandyCard } from '../../components/dashboard/CandyCard';
@@ -140,7 +141,8 @@ const getFallbackResponse = (userMessage: string): string => {
 // screen of chatbot
 // check token and if can connect to backend or use AI locally
 export default function ChatbotScreen() {
-  const { isAuthenticated, isLoading: authIsLoading, user, logout } = useAuth();
+  const { isAuthenticated, isLoading: authIsLoading, user } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const D = useD();
   const styles = useDashboardStyles(createChatStyles);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -478,7 +480,7 @@ export default function ChatbotScreen() {
     <VitalisShell
       activeNavId="chatbot"
       userName={user?.full_name || 'Patient'}
-      onLogout={logout}
+      onLogout={handleLogout}
       headerExtra={headerTools}
       disableScroll
     >

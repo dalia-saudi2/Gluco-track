@@ -1,9 +1,8 @@
 import { Redirect } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
-import { getOnboardingRoute } from '../utils/authRouting';
 
 export default function Index() {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return null;
@@ -13,5 +12,6 @@ export default function Index() {
     return <Redirect href="/login" />;
   }
 
-  return <Redirect href={getOnboardingRoute(user)} />;
+  // AuthGate routes authenticated users to the correct onboarding step or dashboard.
+  return null;
 }

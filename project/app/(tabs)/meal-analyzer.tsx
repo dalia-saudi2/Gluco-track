@@ -18,6 +18,7 @@ import { ScanLine, ChevronDown, Upload } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { VitalisShell } from '../../components/vitalis/VitalisShell';
 import { CandyCard } from '../../components/dashboard/CandyCard';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
@@ -81,7 +82,8 @@ type CartLine = {
 };
 
 export default function MealAnalyzerScreen() {
-  const { user, isAuthenticated, isLoading: authIsLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading: authIsLoading } = useAuth();
+  const handleLogout = useLogoutAndRedirect();
   const router = useRouter();
   const D = useD();
   const styles = useDashboardStyles(createStyles);
@@ -542,7 +544,7 @@ export default function MealAnalyzerScreen() {
     <VitalisShell
       activeNavId="meal-analyzer"
       userName={user?.full_name || 'Patient'}
-      onLogout={logout}
+      onLogout={handleLogout}
       disableScroll
     >
       <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

@@ -14,7 +14,10 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, HelpCircle, Upload, FileEdit } from 'lucide-react-native';
 import { apiClient } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { authService } from '../../services/authService';
 import { showToast } from '../../components/ToastProvider';
+import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { useOnboardingNav } from '../../utils/useOnboardingNav';
 import { LabChoiceColors as C } from '../../constants/LabOnboardingColors';
 
 const FONT = {
@@ -28,6 +31,7 @@ export default function LabChoiceScreen() {
   const router = useRouter();
   const { refreshUser } = useAuth();
   const { width } = useWindowDimensions();
+  const { goBack, canGoBack, stepInfo } = useOnboardingNav('lab-choice');
   const isWide = width >= 640;
 
   const [choice, setChoice] = useState<Choice>(null);
@@ -40,12 +44,12 @@ export default function LabChoiceScreen() {
       const hasLab = choice === 'yes';
       await apiClient.updateOnboardingLabChoice(hasLab);
       await refreshUser();
-      if (hasLab) {
-        router.replace('/onboarding/lab-upload');
-      } else {
-        showToast.success('All set', 'You can add lab results later from Records.');
-        router.replace('/(tabs)');
+      const user = await authService.getCurrentUser();
+      const route = await resolveOnboardingRoute(user);
+      if (choice === 'no') {
+        showToast.success('All set', 'Enter your health measurements next.');
       }
+      router.replace(route);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save your choice.';
       showToast.error('Error', msg);
@@ -57,11 +61,15 @@ export default function LabChoiceScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.header}>
-        <Pressable style={styles.headerBtn} onPress={() => router.back()}>
-          <ArrowLeft size={22} color={C.primary} />
-        </Pressable>
+        {canGoBack ? (
+          <Pressable style={styles.headerBtn} onPress={goBack}>
+            <ArrowLeft size={22} color={C.primary} />
+          </Pressable>
+        ) : (
+          <View style={styles.headerBtn} />
+        )}
         <View style={styles.stepPill}>
-          <Text style={styles.stepPillText}>Step 2 of 3</Text>
+          <Text style={styles.stepPillText}>{stepInfo.label}</Text>
         </View>
         <Pressable style={styles.headerBtn}>
           <HelpCircle size={22} color={C.onSurfaceVariant} />
@@ -69,7 +77,7 @@ export default function LabChoiceScreen() {
       </View>
 
       <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: '66.66%' }]} />
+        <View style={[styles.progressFill, { width: `${stepInfo.percent}%` }]} />
       </View>
 
       <ScrollView

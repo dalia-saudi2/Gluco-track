@@ -23,9 +23,6 @@ import {
   Settings,
   AlertTriangle,
   X,
-  Heart,
-  Droplets,
-  Brain,
   Eye,
   Activity,
   Footprints,
@@ -38,7 +35,6 @@ import {
   Phone,
   FlaskConical,
   Siren,
-  Smile,
   UtensilsCrossed,
   Microscope,
   Wand2,
@@ -57,7 +53,6 @@ import { MobileMenuButton } from '../vitalis/MobileMenuButton';
 import { ThemeToggleButton } from '../vitalis/ThemeToggleButton';
 
 const SIDEBAR_BREAKPOINT = 1024;
-const MOODS = ['😞', '😐', '🙂', '😊', '😄'];
 
 const NAV = [
   { id: 'index', label: 'Dashboard', icon: LayoutDashboard, route: '/(tabs)' },
@@ -86,6 +81,7 @@ export type VitalisDashboardProps = {
     location: string;
   } | null;
   labResults?: LabItem[];
+  onLogout?: () => void;
 };
 
 const { ScreenThemeProvider, useScreenTheme } = createDashboardScreenTheme<ReturnType<typeof createStyles>>();
@@ -143,6 +139,7 @@ export function VitalisDashboard({
   medications = DEFAULT_MEDS,
   nextAppointment,
   labResults = DEFAULT_LABS,
+  onLogout,
 }: VitalisDashboardProps) {
   const router = useRouter();
   const D = useD();
@@ -152,7 +149,6 @@ export function VitalisDashboard({
   const showSidebar = width >= SIDEBAR_BREAKPOINT;
   const isWide = width >= 768;
   const [alertVisible, setAlertVisible] = useState(true);
-  const [mood, setMood] = useState(2);
 
   const firstName = useMemo(() => userName.split(' ')[0] || userName, [userName]);
   const greeting = useMemo(() => {
@@ -214,7 +210,7 @@ export function VitalisDashboard({
                     <Text style={sb.sidebarRole}>Diabetes Patient</Text>
                   </View>
                 </View>
-                <Pressable style={sb.logoutRow}>
+                <Pressable style={sb.logoutRow} onPress={onLogout}>
                   <LogOut size={16} color={D.onSurfaceVariant} />
                   <Text style={sb.logoutText}>Logout</Text>
                 </Pressable>
@@ -226,7 +222,7 @@ export function VitalisDashboard({
             <View style={[s.topBar, showSidebar && s.topBarDesktop]}>
               {!showSidebar ? (
                 <View style={s.topBarLeft}>
-                  <MobileMenuButton activeNavId="index" userName={userName} />
+                  <MobileMenuButton activeNavId="index" userName={userName} onLogout={onLogout} />
                   <Text style={s.topGreeting} numberOfLines={1}>
                     {greeting}, {firstName}.
                   </Text>
@@ -340,29 +336,6 @@ export function VitalisDashboard({
 
               <View style={[s.grid3, isWide && s.grid3Wide]}>
                 <CandyCard style={s.padCard}>
-                  <SectionLabel>Health Risk Profile</SectionLabel>
-                  {[
-                    { icon: Heart, label: 'Cardiovascular', risk: 'Low', c: D.green, bg: '#dcfce7' },
-                    { icon: Droplets, label: 'Kidney', risk: 'Moderate', c: D.orange, bg: '#ffedd5' },
-                    { icon: Brain, label: 'Neuropathy', risk: 'Low', c: D.green, bg: '#dcfce7' },
-                    { icon: Eye, label: 'Retinopathy', risk: 'Critical', c: D.primary, bg: 'rgba(224,64,160,0.1)' },
-                  ].map((row) => (
-                    <View key={row.label} style={s.riskRow}>
-                      <View style={s.riskLeft}>
-                        <View style={s.riskIconWrap}>
-                          <row.icon size={18} color={row.label === 'Retinopathy' ? D.primary : D.secondary} />
-                        </View>
-                        <Text style={s.riskName}>{row.label}</Text>
-                      </View>
-                      <RiskPill label={row.risk} color={row.c} bg={row.bg} />
-                    </View>
-                  ))}
-                  <Pressable style={s.ghostBtn}>
-                    <Text style={s.ghostBtnText}>View full risk report →</Text>
-                  </Pressable>
-                </CandyCard>
-
-                <CandyCard style={s.padCard}>
                   <View style={s.glucoseHead}>
                     <View>
                       <SectionLabel>Glucose Stability</SectionLabel>
@@ -443,8 +416,6 @@ export function VitalisDashboard({
                 <CandyCard style={s.padCard}>
                   <SectionLabel>Complication Risks (5yr)</SectionLabel>
                   {[
-                    { name: 'Neuropathy', pct: 14, label: '14% (Low)', color: D.green, delta: '↓ 2%' },
-                    { name: 'Kidney Function', pct: 42, label: '42% (Elevated)', color: D.orange, delta: '↓ 3%' },
                     { name: 'Vision (Retinopathy)', pct: 68, label: '68% (Critical)', color: D.primary, delta: '↑ 14%', critical: true },
                   ].map((r) => (
                     <View key={r.name} style={s.compRow}>
@@ -493,7 +464,6 @@ export function VitalisDashboard({
                     <SectionLabel>Quick Actions</SectionLabel>
                     <View style={s.quickGrid}>
                       {[
-                        { icon: Pill, label: 'Request Refill', color: D.primary, route: '/(tabs)/medication-refill' },
                         { icon: Phone, label: 'Call Doctor', color: D.secondary, route: '/(tabs)/appointments' },
                         { icon: FlaskConical, label: 'Book Lab Test', color: D.tertiary, route: '/(tabs)/appointments' },
                         { icon: Siren, label: 'Emergency', color: D.error, route: '/(tabs)/chatbot' },
@@ -509,26 +479,6 @@ export function VitalisDashboard({
               </View>
 
               <View style={[s.grid4, isWide && s.grid4Wide]}>
-                <CandyCard style={s.padCard}>
-                  <View style={s.cardHeadRow}>
-                    <Smile size={16} color={D.secondary} />
-                    <SectionLabel>Mood Today</SectionLabel>
-                  </View>
-                  <View style={s.moodRow}>
-                    {MOODS.map((emoji, i) => (
-                      <Pressable key={i} onPress={() => setMood(i)} style={[s.moodBtn, mood === i && s.moodBtnActive]}>
-                        <Text style={s.moodEmoji}>{emoji}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                  <Text style={s.moodSub}>Feeling okay today. Stress level:</Text>
-                  <View style={s.stressRow}>
-                    <ProgressTrack pct={40} color={D.orange} />
-                    <Text style={s.stressLbl}>Moderate</Text>
-                  </View>
-                  <View style={s.chipPurple}><Text style={s.chipPurpleText}>4-day streak 🔥</Text></View>
-                </CandyCard>
-
                 <CandyCard style={s.padCard}>
                   <View style={s.cardHeadRow}>
                     <UtensilsCrossed size={16} color={D.primary} />
@@ -742,10 +692,6 @@ function createStyles(D: DashboardPalette) {
   bmiMarker: { position: 'absolute', left: '62%', top: 0, bottom: 0, width: 3, backgroundColor: D.onSurface, borderRadius: 99 },
   bmiLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   bmiLabel: { fontFamily: DF.bold, fontSize: 8, color: D.onSurfaceVariant, textTransform: 'uppercase' },
-  riskRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  riskLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  riskIconWrap: { padding: 8, borderRadius: 999, backgroundColor: 'rgba(124,82,170,0.1)' },
-  riskName: { fontFamily: DF.bold, fontSize: 13, color: D.onSurface },
   riskPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   riskPillText: { fontFamily: DF.bold, fontSize: 9, textTransform: 'uppercase' },
   ghostBtn: { marginTop: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: D.surfaceContainer, alignItems: 'center' },
@@ -807,15 +753,6 @@ function createStyles(D: DashboardPalette) {
   quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   quickBtn: { width: '47%', alignItems: 'center', gap: 6, padding: 12, borderRadius: 16, borderWidth: 1 },
   quickLabel: { fontFamily: DF.bold, fontSize: 9, color: D.onSurfaceVariant, textAlign: 'center' },
-  moodRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  moodBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: D.surfaceContainer, alignItems: 'center', justifyContent: 'center' },
-  moodBtnActive: { backgroundColor: 'rgba(224,64,160,0.1)', borderWidth: 2, borderColor: D.primary },
-  moodEmoji: { fontSize: 18 },
-  moodSub: { fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, marginBottom: 8 },
-  stressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stressLbl: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant },
-  chipPurple: { alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: 'rgba(124,82,170,0.1)' },
-  chipPurpleText: { fontFamily: DF.bold, fontSize: 9, color: D.secondary },
   kcalText: { fontFamily: DF.bold, fontSize: 24, color: D.primary, textAlign: 'center', marginBottom: 12 },
   kcalSub: { fontSize: 13, color: D.onSurfaceVariant },
   nutrRow: { marginBottom: 10 },

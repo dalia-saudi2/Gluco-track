@@ -15,7 +15,8 @@ import { useRouter } from 'expo-router';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { showToast } from '../components/ToastProvider';
-import { getPostAuthRoute } from '../utils/authRouting';
+import { needsOnboarding } from '../utils/authRouting';
+import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
 import { authService } from '../services/authService';
 import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
@@ -66,9 +67,11 @@ export default function LoginScreen() {
     try {
       setIsLoading(true);
       await loginWithGoogle(token);
-      showToast.success('Welcome', 'Signed in with Google successfully');
       const currentUser = await authService.getCurrentUser();
-      router.replace(getPostAuthRoute(currentUser));
+      if (!needsOnboarding(currentUser)) {
+        showToast.success('Welcome Back', 'Logged in successfully.');
+      }
+      router.replace(await resolveOnboardingRoute(currentUser));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Google sign in failed';
       showToast.error('Login Failed', msg);
@@ -86,9 +89,11 @@ export default function LoginScreen() {
     try {
       setIsLoading(true);
       await login(email, password);
-      showToast.success('Welcome Back', 'Logged in successfully.');
       const currentUser = await authService.getCurrentUser();
-      router.replace(getPostAuthRoute(currentUser));
+      if (!needsOnboarding(currentUser)) {
+        showToast.success('Welcome Back', 'Logged in successfully.');
+      }
+      router.replace(await resolveOnboardingRoute(currentUser));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Invalid credentials';
       showToast.error('Login Failed', msg);
