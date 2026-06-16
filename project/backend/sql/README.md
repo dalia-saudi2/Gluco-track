@@ -7,6 +7,9 @@ Full 20-table schema for the healthcare platform.
 | File | Purpose |
 |---|---|
 | `schema.sql` | Complete DDL — enums, tables, indexes, triggers, views, RLS |
+| `patient_features.sqlite.sql` | Groups 1–5 feature tables (SQLite dev) |
+| `healthcare.sqlite.schema.sql` | Live SQLite schema export (auto-generated) |
+| `healthcare.sqlite.snapshot.sql` | Full SQLite backup — schema + data (auto-generated) |
 | `migrations/001_feature_groups.sql` | Groups 1–5 columns + `patient_clinical_profile` (PostgreSQL patch) |
 | `ERD_feature_groups.html` | Interactive ERD diagram (5 collection groups) |
 | `FEATURE_GROUPS.md` | Feature-to-table mapping reference |
@@ -32,7 +35,16 @@ DATABASE_URL=postgresql://healthcare:healthcare_dev@localhost:5432/healthcare
 
 ```powershell
 cd c:\Users\dalia\final_patient\project\backend
-python migrate_feature_groups.py
+py -3.12 setup_database.py          # create tables + migrations
+py -3.12 setup_database.py --seed   # optional sample data
+py -3.12 export_database.py         # save live DB to sql/*.sql files
+```
+
+Restore from snapshot:
+
+```powershell
+py -3.12 setup_database.py --fresh
+Get-Content sql\healthcare.sqlite.snapshot.sql | sqlite3 healthcare.db
 ```
 
 ## Option A — Docker (recommended)

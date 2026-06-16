@@ -1,0 +1,9 @@
+# Local IDE settings
+.vscode/
+
+# Accidental artifact folder (Cursor/VS Code variable leak)
+${workspaceFolder}/
+
+# OS
+.DS_Store
+Thumbs.db
