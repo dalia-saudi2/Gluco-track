@@ -4,6 +4,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { dashboardService } from '../../services/dashboardService';
 import { VitalisDashboard, type VitalisDashboardProps } from '../../components/dashboard/VitalisDashboard';
+import { useHealthPermissions } from '../../hooks/useHealthPermissions';
+import { useHealth } from '../../hooks/useHealth';
 
 function mapMedStatus(index: number, isOverdue?: boolean): 'taken' | 'missed' | 'upcoming' | 'later' {
   if (index === 0) return 'taken';
@@ -17,6 +19,9 @@ export default function DashboardScreen() {
   const handleLogout = useLogoutAndRedirect();
   const [loading, setLoading] = useState(true);
   const [props, setProps] = useState<Partial<VitalisDashboardProps>>({});
+
+  const { status } = useHealthPermissions();
+  const { today } = useHealth(status);
 
   useFocusEffect(
     useCallback(() => {
@@ -90,6 +95,9 @@ export default function DashboardScreen() {
       nextAppointment={props.nextAppointment}
       labResults={props.labResults}
       onLogout={handleLogout}
+      todaySteps={status === 'granted' ? today.steps : undefined}
+      todaySleep={status === 'granted' ? today.sleepHours : undefined}
+      healthPermissionStatus={status}
     />
   );
 }

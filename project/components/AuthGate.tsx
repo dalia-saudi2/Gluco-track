@@ -89,7 +89,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
     const onOnboarding = root === 'onboarding';
 
-    const onIndex = !root || root === 'index';
+    const onIndex = !root || (root as string) === 'index';
 
 
 

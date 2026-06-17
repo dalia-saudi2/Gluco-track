@@ -42,6 +42,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  Heart,
 } from 'lucide-react-native';
 import { CandyCard } from './CandyCard';
 import { DF, DashboardPalette, D_LIGHT } from '../../constants/DashboardColors';
@@ -58,6 +59,7 @@ const NAV = [
   { id: 'index', label: 'Dashboard', icon: LayoutDashboard, route: '/(tabs)' },
   { id: 'appointments', label: 'Appointment', icon: Calendar, route: '/(tabs)/appointments' },
   { id: 'meal-analyzer', label: 'GlucoScan AI', icon: ScanLine, route: '/(tabs)/meal-analyzer' },
+  { id: 'health', label: 'Health Sync', icon: Heart, route: '/(tabs)/health' },
   { id: 'records', label: 'Records', icon: FolderOpen, route: '/(tabs)/records' },
   { id: 'chatbot', label: 'AI Assistant', icon: Bot, route: '/(tabs)/chatbot' },
   { id: 'profile', label: 'Profile', icon: User, route: '/(tabs)/profile' },
@@ -82,6 +84,9 @@ export type VitalisDashboardProps = {
   } | null;
   labResults?: LabItem[];
   onLogout?: () => void;
+  todaySteps?: number;
+  todaySleep?: number;
+  healthPermissionStatus?: string;
 };
 
 const { ScreenThemeProvider, useScreenTheme } = createDashboardScreenTheme<ReturnType<typeof createStyles>>();
@@ -140,6 +145,9 @@ export function VitalisDashboard({
   nextAppointment,
   labResults = DEFAULT_LABS,
   onLogout,
+  todaySteps,
+  todaySleep,
+  healthPermissionStatus,
 }: VitalisDashboardProps) {
   const router = useRouter();
   const D = useD();
@@ -365,22 +373,50 @@ export function VitalisDashboard({
                 <CandyCard style={s.padCard}>
                   <SectionLabel>Lifestyle Monitoring</SectionLabel>
                   {[
-                    { icon: Footprints, label: 'Steps', val: '8,400 / 10k', pct: 84, color: D.secondary },
-                    { icon: Moon, label: 'Sleep', val: '6.5h / 8h', pct: 81, color: D.primary },
-                    { icon: GlassWater, label: 'Water', val: '1.2L / 2.5L ⚠', pct: 45, color: D.orange },
-                    { icon: Armchair, label: 'Active time', val: '2.8h / 4h', pct: 70, color: D.orange },
-                  ].map((row) => (
-                    <View key={row.label} style={s.lifeRow}>
-                      <View style={s.lifeHead}>
-                        <View style={s.lifeLeft}>
-                          <row.icon size={12} color={row.color} />
-                          <Text style={s.lifeLabel}>{row.label}</Text>
+                    {
+                      icon: Footprints,
+                      label: 'Steps',
+                      val: todaySteps !== undefined ? `${todaySteps.toLocaleString()} / 10k` : '8,400 / 10k',
+                      pct: todaySteps !== undefined ? Math.round((todaySteps / 10000) * 100) : 84,
+                      color: D.secondary,
+                      route: '/(tabs)/health'
+                    },
+                    {
+                      icon: Moon,
+                      label: 'Sleep',
+                      val: todaySleep !== undefined ? `${todaySleep}h / 8h` : '6.5h / 8h',
+                      pct: todaySleep !== undefined ? Math.round((todaySleep / 8) * 100) : 81,
+                      color: D.primary,
+                      route: '/(tabs)/health'
+                    },
+                    { icon: GlassWater, label: 'Water', val: '1.2L / 2.5L ⚠', pct: 45, color: D.orange, route: undefined },
+                    { icon: Armchair, label: 'Active time', val: '2.8h / 4h', pct: 70, color: D.orange, route: undefined },
+                  ].map((row) => {
+                    const rowContent = (
+                      <View style={s.lifeRow}>
+                        <View style={s.lifeHead}>
+                          <View style={s.lifeLeft}>
+                            <row.icon size={12} color={row.color} />
+                            <Text style={s.lifeLabel}>{row.label}</Text>
+                          </View>
+                          <Text style={[s.lifeVal, row.label === 'Water' && { color: D.orange }]}>{row.val}</Text>
                         </View>
-                        <Text style={[s.lifeVal, row.label === 'Water' && { color: D.orange }]}>{row.val}</Text>
+                        <ProgressTrack pct={row.pct} color={row.color} />
                       </View>
-                      <ProgressTrack pct={row.pct} color={row.color} />
-                    </View>
-                  ))}
+                    );
+                    if (row.route) {
+                      return (
+                        <Pressable key={row.label} onPress={() => router.push(row.route as never)}>
+                          {rowContent}
+                        </Pressable>
+                      );
+                    }
+                    return (
+                      <View key={row.label}>
+                        {rowContent}
+                      </View>
+                    );
+                  })}
                 </CandyCard>
               </View>
 

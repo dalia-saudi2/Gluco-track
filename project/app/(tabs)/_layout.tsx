@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Chrome as Home, FileText, Calendar, User, Bot, ScanLine } from 'lucide-react-native';
+import { Chrome as Home, FileText, Calendar, User, Bot, ScanLine, Heart } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
@@ -52,6 +52,15 @@ export default function TabLayout() {
           title: 'GlucoScan',
           tabBarIcon: ({ size, color }) => (
             <ScanLine size={size} color={color} strokeWidth={2} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="health"
+        options={{
+          title: 'Health Sync',
+          tabBarIcon: ({ size, color }) => (
+            <Heart size={size} color={color} strokeWidth={2} />
           ),
         }}
       />

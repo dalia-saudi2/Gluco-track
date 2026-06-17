@@ -9,7 +9,22 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "Allow access to read steps, sleep, and active calories for health tracking."
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true
+      },
+      "bundleIdentifier": "com.mahmovdsayed.patient-portal"
+    },
+    "android": {
+      "permissions": [
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -25,7 +40,9 @@
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to analyze meals for diabetes management."
         }
-      ]
+      ],
+      "react-native-health",
+      "react-native-health-connect"
     ],
     "experiments": {
       "typedRoutes": true
