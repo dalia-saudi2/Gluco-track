@@ -200,6 +200,8 @@ export function RootStack() {
 
       <Stack.Screen name="(tabs)" />
 
+      <Stack.Screen name="doctor-chat" />
+
       <Stack.Screen name="+not-found" />
 
     </Stack>

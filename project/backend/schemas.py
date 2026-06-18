@@ -527,3 +527,153 @@ class RiskSummary(BaseModel):
     feature_pills: dict
     account_age_days: int = 0
 
+
+class GlucoseReadingType(str, Enum):
+    fasting = "fasting"
+    post_meal = "post_meal"
+    random = "random"
+    bedtime = "bedtime"
+
+
+class GlucoseReadingSource(str, Enum):
+    manual = "manual"
+    device_sync = "device_sync"
+    ocr = "ocr"
+
+
+class GlucoseReadingCreate(BaseModel):
+    value_mgdl: int
+    reading_type: GlucoseReadingType
+    measured_at: datetime
+    notes: Optional[str] = None
+    source: GlucoseReadingSource = GlucoseReadingSource.manual
+
+    @field_validator("value_mgdl")
+    @classmethod
+    def validate_value(cls, v: int) -> int:
+        if v < 20 or v > 600:
+            raise ValueError("value_mgdl must be between 20 and 600")
+        return v
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 500:
+            raise ValueError("notes must be at most 500 characters")
+        return v
+
+
+class GlucoseReadingResponse(BaseModel):
+    id: int
+    patient_id: int
+    value_mgdl: int
+    reading_type: str
+    measured_at: datetime
+    status: str
+    notes: Optional[str] = None
+    source: str
+    device_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GlucoseReadingCreatedResponse(BaseModel):
+    id: int
+    status: str
+    measured_at: datetime
+
+
+class GlucoseReadingListResponse(BaseModel):
+    items: List[GlucoseReadingResponse]
+    page: int
+    limit: int
+    total: int
+
+
+class GlucoseDashboardDayPoint(BaseModel):
+    day: str
+    value: Optional[float] = None
+    date: str
+
+
+class GlucoseWeeklySummaryResponse(BaseModel):
+    week_start: str
+    avg_value: float
+    min_value: int
+    max_value: int
+    readings_count: int
+    days_in_range: int
+    days_elevated: int
+    days_high: int
+
+
+class GlucoseDashboardResponse(BaseModel):
+    days: List[GlucoseDashboardDayPoint]
+    weekly_summary: Optional[GlucoseWeeklySummaryResponse] = None
+    today_value: Optional[float] = None
+    today_day: str
+    today_status: Optional[str] = None
+
+
+class WaterIntakeAddRequest(BaseModel):
+    amount_ml: int
+
+    @field_validator("amount_ml")
+    @classmethod
+    def validate_amount(cls, v: int) -> int:
+        if v < 1 or v > 5000:
+            raise ValueError("amount_ml must be between 1 and 5000")
+        return v
+
+
+class WaterIntakeTodayResponse(BaseModel):
+    intake_date: str
+    total_ml: int
+    total_liters: float
+    goal_ml: int
+    goal_liters: float
+    log_count: int
+    cups_equivalent: float
+    glasses_filled: int
+    glasses_total: int
+    goal_reached: bool
+    updated_at: Optional[str] = None
+    last_logged_at: Optional[str] = None
+
+
+class DoctorChatMessageOut(BaseModel):
+    id: int
+    sender: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DoctorChatConversationSummary(BaseModel):
+    id: int
+    doctor_name: str
+    title: str
+    last_message_preview: Optional[str] = None
+    last_message_at: datetime
+    unread_count: int = 0
+    patient_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DoctorChatConversationDetail(BaseModel):
+    id: int
+    doctor_name: str
+    title: str
+    patient_name: Optional[str] = None
+    messages: List[DoctorChatMessageOut] = []
+
+
+class DoctorChatMessageCreate(BaseModel):
+    content: str
+

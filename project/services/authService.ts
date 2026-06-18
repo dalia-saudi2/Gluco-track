@@ -1,6 +1,7 @@
 import { apiClient } from '../config/api';
 import { storageService } from './storageService';
 import { environmentConfig } from '../config/environment';
+import type { QuickContacts } from '../types/quickContacts';
 
 export interface User {
   id: number;
@@ -34,6 +35,7 @@ export interface User {
   caregiver_name?: string | null;
   caregiver_phone?: string | null;
   preferred_language?: string | null;
+  quick_contacts?: QuickContacts | null;
 }
 
 export interface AuthResponse {

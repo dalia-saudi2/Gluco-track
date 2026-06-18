@@ -35,6 +35,9 @@ import glucose_validation
 import glucose_ml_service
 import dexcom_integration
 from lab_onboarding import router as lab_onboarding_router
+from glucose_readings_router import router as glucose_readings_router
+from water_intake_router import router as water_intake_router
+from doctor_chat_router import router as doctor_chat_router
 
 # =================================================================
 # GLOBAL API CONFIGURATION
@@ -49,9 +52,9 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     if settings.deepseek_api_key:
-        print(f"✓ DeepSeek API key loaded (length: {len(settings.deepseek_api_key)})")
+        print(f"[OK] DeepSeek API key loaded (length: {len(settings.deepseek_api_key)})")
     else:
-        print("✗ WARNING: DeepSeek API key is not set! Check your .env file.")
+        print("WARNING: DeepSeek API key is not set! Check your .env file.")
 
 # CORS middleware
 app.add_middleware(
@@ -66,6 +69,9 @@ app.add_middleware(
 create_tables()
 
 app.include_router(lab_onboarding_router)
+app.include_router(glucose_readings_router)
+app.include_router(water_intake_router)
+app.include_router(doctor_chat_router)
 
 # Root endpoint
 @app.get("/")

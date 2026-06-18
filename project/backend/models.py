@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON, Computed
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON, Computed, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -358,3 +358,101 @@ class AppNotification(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     patient = relationship("User", backref="app_notifications")
+
+
+class GlucoseReading(Base):
+    """Self-monitoring glucose readings (lightweight, high frequency)."""
+    __tablename__ = "glucose_readings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    value_mgdl = Column(Integer, nullable=False)
+    reading_type = Column(String, nullable=False)  # fasting | post_meal | random | bedtime
+    measured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String, nullable=False)  # low | normal | elevated | high
+    notes = Column(Text, nullable=True)
+    source = Column(String, default="manual", nullable=False)  # manual | device_sync | ocr
+    device_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("User", backref="glucose_readings")
+
+
+class GlucoseWeeklySummary(Base):
+    __tablename__ = "glucose_weekly_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    week_start = Column(DateTime, nullable=False)
+    avg_value = Column(Float, nullable=False)
+    min_value = Column(Integer, nullable=False)
+    max_value = Column(Integer, nullable=False)
+    readings_count = Column(Integer, nullable=False)
+    days_in_range = Column(Integer, nullable=False)
+    days_elevated = Column(Integer, nullable=False)
+    days_high = Column(Integer, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    patient = relationship("User", backref="glucose_weekly_summaries")
+
+
+class WaterIntakeDaily(Base):
+    """One row per patient per calendar day — resets every 24h at midnight UTC."""
+    __tablename__ = "water_intake_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    intake_date = Column(Date, nullable=False, index=True)
+    total_ml = Column(Integer, nullable=False, default=0)
+    goal_ml = Column(Integer, nullable=False, default=2500)
+    log_count = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    patient = relationship("User", backref="water_intake_daily")
+
+
+class WaterIntakeLog(Base):
+    """Individual water add events within a day."""
+    __tablename__ = "water_intake_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    intake_date = Column(Date, nullable=False, index=True)
+    amount_ml = Column(Integer, nullable=False)
+    logged_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    patient = relationship("User", backref="water_intake_logs")
+
+
+class DoctorConversation(Base):
+    """Threaded chat between a patient and their doctor."""
+    __tablename__ = "doctor_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    doctor_name = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    last_message_preview = Column(String, nullable=True)
+    last_message_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    patient_unread_count = Column(Integer, default=0)
+    doctor_unread_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("User", backref="doctor_conversations")
+    messages = relationship(
+        "DoctorConversationMessage",
+        back_populates="conversation",
+        order_by="DoctorConversationMessage.created_at",
+    )
+
+
+class DoctorConversationMessage(Base):
+    __tablename__ = "doctor_conversation_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("doctor_conversations.id"), nullable=False, index=True)
+    sender = Column(String, nullable=False)  # patient, doctor
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    conversation = relationship("DoctorConversation", back_populates="messages")

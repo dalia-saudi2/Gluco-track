@@ -131,7 +131,6 @@ export default function HealthFeaturesScreen() {
   const [hypertension, setHypertension] = useState(false);
   const [cardiovascular, setCardiovascular] = useState(false);
   const [dietQuality, setDietQuality] = useState<string | null>(null);
-  const [stressLevel, setStressLevel] = useState('3');
   const [hba1c, setHba1c] = useState('');
   const [hematocrit, setHematocrit] = useState('');
 
@@ -241,7 +240,6 @@ export default function HealthFeaturesScreen() {
         sleep_hours_per_day: Number(sleepHours),
         screen_time_hours_per_day: Number(screenHours),
         diet_quality: dietQuality,
-        stress_level: stressLevel.trim() ? Number(stressLevel) : null,
         family_history_diabetes: familyDiabetes,
         hypertension_history: hypertension,
         cardiovascular_history: cardiovascular,
@@ -409,7 +407,6 @@ export default function HealthFeaturesScreen() {
             </Pressable>
           ))}
         </View>
-        <NumField label="Stress level (1–5, optional)" value={stressLevel} onChange={setStressLevel} />
 
         <Text style={styles.sectionTitle}>Body measurements</Text>
         <NumField label="Height" value={heightCm} onChange={setHeightCm} unit="cm" />

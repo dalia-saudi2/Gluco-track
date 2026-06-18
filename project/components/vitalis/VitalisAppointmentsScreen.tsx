@@ -482,7 +482,7 @@ export function VitalisAppointmentsScreen({
             ))}
           </View>
           <View style={s.notifyRow}>
-            <Text style={s.notifyLbl}>Notify via:</Text>
+            <Text style={s.notifyLbl}>Remind via:</Text>
             <NotifyChip label="Email" active={prefEmail} onPress={onToggleEmail} />
             <NotifyChip label="SMS" active={prefSms} onPress={onToggleSms} />
             <NotifyChip label="App" active={prefPush} onPress={onTogglePush} />

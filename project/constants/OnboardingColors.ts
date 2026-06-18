@@ -53,6 +53,6 @@ export const ETHNICITY_OPTIONS = ['Asian', 'Black', 'Hispanic', 'White', 'Other'
 
 export const EMPLOYMENT_OPTIONS = ['Employed', 'Unemployed', 'Student', 'Retired'] as const;
 
-export const INCOME_OPTIONS = ['Under $25k', '$25k-$50k', '$50k-$100k', '$100k+'] as const;
+export const INCOME_OPTIONS = ['Under 25k', '25k-50k', '50k-100k', '100k+'] as const;
 
 export const GENDER_OPTIONS = ['Male', 'Female'] as const;

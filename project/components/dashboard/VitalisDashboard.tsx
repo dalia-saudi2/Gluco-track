@@ -24,7 +24,6 @@ import {
   AlertTriangle,
   X,
   Eye,
-  Activity,
   Footprints,
   Moon,
   GlassWater,
@@ -38,6 +37,7 @@ import {
   UtensilsCrossed,
   Microscope,
   Wand2,
+  Upload,
   LogOut,
   ArrowDown,
   ArrowUp,
@@ -45,6 +45,14 @@ import {
   Heart,
 } from 'lucide-react-native';
 import { CandyCard } from './CandyCard';
+import { GlucoseStabilityCard, type GlucoseDayPoint } from './GlucoseTrendChart';
+import { WaterIntakeCard } from './WaterIntakeCard';
+import { DoctorChatCard } from './DoctorChatCard';
+import { useNavigateToLabUpload } from '../../hooks/useNavigateToLabUpload';
+import { useNavigateToAppointments } from '../../hooks/useNavigateToAppointments';
+import { pickAndCall } from '../../utils/callContact';
+import { APPOINTMENTS_ROUTE } from '../../utils/navigateToAppointments';
+import type { QuickContacts } from '../../types/quickContacts';
 import { DF, DashboardPalette, D_LIGHT } from '../../constants/DashboardColors';
 import { useD } from '../../hooks/useDashboardTheme';
 import { createDashboardScreenTheme } from '../../hooks/dashboardScreenTheme';
@@ -87,6 +95,14 @@ export type VitalisDashboardProps = {
   todaySteps?: number;
   todaySleep?: number;
   healthPermissionStatus?: string;
+  glucoseDays?: GlucoseDayPoint[];
+  glucoseTodayDay?: string;
+  glucoseTodayStatus?: string | null;
+  onViewGlucoseHistory?: () => void;
+  onAddGlucoseReading?: () => void;
+  patientId?: number;
+  onUploadLab?: () => void;
+  quickContacts?: QuickContacts | null;
 };
 
 const { ScreenThemeProvider, useScreenTheme } = createDashboardScreenTheme<ReturnType<typeof createStyles>>();
@@ -148,8 +164,24 @@ export function VitalisDashboard({
   todaySteps,
   todaySleep,
   healthPermissionStatus,
+  glucoseDays = [],
+  glucoseTodayDay = '—',
+  glucoseTodayStatus,
+  onViewGlucoseHistory,
+  onAddGlucoseReading,
+  patientId,
+  onUploadLab,
+  quickContacts,
 }: VitalisDashboardProps) {
   const router = useRouter();
+  const navigateToLabUpload = useNavigateToLabUpload();
+  const goToAppointments = useNavigateToAppointments();
+  const handleUploadLab = onUploadLab ?? navigateToLabUpload;
+  const contacts = quickContacts ?? {
+    emergency_contacts: [],
+    labs: [],
+    pharmacies: [],
+  };
   const D = useD();
   const s = useMemo(() => StyleSheet.create(createStyles(D)), [D]);
   const sb = useMemo(() => StyleSheet.create(createSidebarStyles(D)), [D]);
@@ -344,30 +376,19 @@ export function VitalisDashboard({
 
               <View style={[s.grid3, isWide && s.grid3Wide]}>
                 <CandyCard style={s.padCard}>
-                  <View style={s.glucoseHead}>
-                    <View>
-                      <SectionLabel>Glucose Stability</SectionLabel>
-                      <Text style={s.glucoseValue}>114 <Text style={s.vitalUnit}>mg/dL</Text></Text>
-                      <Text style={s.glucoseSub}>Measured 18 min ago · in range</Text>
-                    </View>
-                    <View style={s.glucoseIcon}>
-                      <Activity size={20} color={D.primary} />
-                    </View>
-                  </View>
-                  <View style={s.barChart}>
-                    {[55, 70, 90, 62, 58, 50, 73].map((h, i) => (
-                      <View key={i} style={[s.bar, { height: `${h}%`, backgroundColor: i === 2 ? '#fdba74' : i === 3 ? D.primary : 'rgba(124,82,170,0.2)' }]} />
-                    ))}
-                  </View>
-                  <View style={s.dayLabels}>
-                    {['Mon', 'Tue', 'Wed↑', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                      <Text key={d} style={s.dayLabel}>{d}</Text>
-                    ))}
-                  </View>
-                  <View style={s.chipRow}>
-                    <View style={s.chipGreen}><Text style={s.chipGreenText}>5 days in range</Text></View>
-                    <View style={s.chipOrange}><Text style={s.chipOrangeText}>1 spike (Wed)</Text></View>
-                  </View>
+                  <GlucoseStabilityCard
+                    days={glucoseDays}
+                    D={D}
+                    todayDay={glucoseTodayDay}
+                    todayStatus={glucoseTodayStatus}
+                    onViewTrend={onViewGlucoseHistory}
+                    onPressCard={onViewGlucoseHistory}
+                    onAddReading={onAddGlucoseReading}
+                  />
+                </CandyCard>
+
+                <CandyCard style={s.padCard} accent="tertiary">
+                  <WaterIntakeCard D={D} patientId={patientId} />
                 </CandyCard>
 
                 <CandyCard style={s.padCard}>
@@ -500,11 +521,42 @@ export function VitalisDashboard({
                     <SectionLabel>Quick Actions</SectionLabel>
                     <View style={s.quickGrid}>
                       {[
-                        { icon: Phone, label: 'Call Doctor', color: D.secondary, route: '/(tabs)/appointments' },
-                        { icon: FlaskConical, label: 'Book Lab Test', color: D.tertiary, route: '/(tabs)/appointments' },
-                        { icon: Siren, label: 'Emergency', color: D.error, route: '/(tabs)/chatbot' },
+                        { icon: Phone, label: 'Call Doctor', color: D.secondary, route: APPOINTMENTS_ROUTE },
+                        {
+                          icon: FlaskConical,
+                          label: 'Book Lab Test',
+                          color: D.tertiary,
+                          action: () => pickAndCall('Call laboratory', contacts.labs),
+                        },
+                        {
+                          icon: Pill,
+                          label: 'Prescription Order',
+                          color: D.secondary,
+                          action: () => pickAndCall('Call pharmacy', contacts.pharmacies),
+                        },
+                        { icon: Upload, label: 'Upload Lab Test', color: D.primary, action: handleUploadLab },
+                        {
+                          icon: Siren,
+                          label: 'Emergency',
+                          color: D.error,
+                          action: () => pickAndCall('Emergency contact', contacts.emergency_contacts),
+                        },
                       ].map((a) => (
-                        <Pressable key={a.label} style={[s.quickBtn, { borderColor: `${a.color}22`, backgroundColor: `${a.color}0d` }]} onPress={() => router.push(a.route as never)}>
+                        <Pressable
+                          key={a.label}
+                          style={[s.quickBtn, { borderColor: `${a.color}22`, backgroundColor: `${a.color}0d` }]}
+                          onPress={() => {
+                            if ('action' in a && a.action) {
+                              void a.action();
+                              return;
+                            }
+                            if (a.route === APPOINTMENTS_ROUTE) {
+                              goToAppointments();
+                              return;
+                            }
+                            router.push(a.route as never);
+                          }}
+                        >
                           <a.icon size={18} color={a.color} />
                           <Text style={s.quickLabel}>{a.label}</Text>
                         </Pressable>
@@ -576,6 +628,8 @@ export function VitalisDashboard({
                   </Pressable>
                 </CandyCard>
               </View>
+
+              <DoctorChatCard D={D} patientId={patientId} />
 
               <View style={[s.grid3, isWide && s.grid3Wide, { paddingBottom: 100 }]}>
                 <CandyCard style={s.padCard}>

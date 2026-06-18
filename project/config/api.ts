@@ -540,6 +540,64 @@ export class ApiClient {
   async getAppNotifications() {
     return this.request('/users/me/notifications');
   }
+
+  async getGlucoseReadings(patientId: number, page = 1, limit = 30, order: 'asc' | 'desc' = 'desc') {
+    const qs = new URLSearchParams({ page: String(page), limit: String(limit), order });
+    return this.request(`/api/patients/${patientId}/glucose-readings?${qs.toString()}`);
+  }
+
+  async getGlucoseDashboard(patientId: number) {
+    return this.request(`/api/patients/${patientId}/glucose-readings/dashboard`);
+  }
+
+  async createGlucoseReading(patientId: number, body: Record<string, unknown>) {
+    return this.request(`/api/patients/${patientId}/glucose-readings`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getWaterIntakeToday(patientId: number) {
+    return this.request(`/api/patients/${patientId}/water-intake/today`);
+  }
+
+  async addWaterIntake(patientId: number, amountMl: number) {
+    return this.request(`/api/patients/${patientId}/water-intake/add`, {
+      method: 'POST',
+      body: JSON.stringify({ amount_ml: amountMl }),
+    });
+  }
+
+  async getDoctorChats(patientId: number) {
+    return this.request(`/api/patients/${patientId}/doctor-chats`);
+  }
+
+  async getDoctorChat(patientId: number, chatId: number) {
+    return this.request(`/api/patients/${patientId}/doctor-chats/${chatId}`);
+  }
+
+  async sendDoctorChatMessage(patientId: number, chatId: number, content: string) {
+    return this.request(`/api/patients/${patientId}/doctor-chats/${chatId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async getDoctorPortalChats(doctorName: string) {
+    const qs = new URLSearchParams({ doctor_name: doctorName });
+    return this.request(`/api/doctor/chats?${qs.toString()}`);
+  }
+
+  async getDoctorPortalChat(chatId: number) {
+    return this.request(`/api/doctor/chats/${chatId}`);
+  }
+
+  async sendDoctorPortalMessage(chatId: number, content: string) {
+    return this.request(`/api/doctor/chats/${chatId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
 }
 
 // Export singleton instance
