@@ -11,7 +11,7 @@ type Props = {
 };
 
 type MetricType = 'steps' | 'sleep' | 'calories';
-type TimeframeType = '7d' | '30d';
+type TimeframeType = '7d' | '30d' | 'month';
 
 export function HealthChart({ history7d, history30d }: Props) {
   const D = useD();
@@ -22,7 +22,7 @@ export function HealthChart({ history7d, history30d }: Props) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   const currentData = useMemo(() => {
-    const source = timeframe === '7d' ? history7d : history30d;
+    const source = timeframe === '30d' || timeframe === 'month' ? history30d : history7d;
     return source[metric] || [];
   }, [timeframe, metric, history7d, history30d]);
 
@@ -63,10 +63,9 @@ export function HealthChart({ history7d, history30d }: Props) {
       if (isNaN(date.getTime())) return dateStr;
       
       if (format === '7d') {
-        // Mon, Tue, etc.
         return date.toLocaleDateString('en-US', { weekday: 'short' });
-      } else {
-        // Jun 12, etc.
+      }
+      if (format === 'month') {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       }
     } catch {
@@ -98,14 +97,14 @@ export function HealthChart({ history7d, history30d }: Props) {
 
         {/* Timeframe selector */}
         <View style={styles.timeframeTabs}>
-          {(['7d', '30d'] as TimeframeType[]).map((t) => (
+          {(['7d', '30d', 'month'] as TimeframeType[]).map((t) => (
             <Pressable
               key={t}
               style={[styles.timeframeTab, timeframe === t && styles.timeframeTabActive]}
               onPress={() => setTimeframe(t)}
             >
               <Text style={[styles.timeframeTabText, timeframe === t && styles.timeframeTabTextActive]}>
-                {t.toUpperCase()}
+                {t === 'month' ? 'MONTH' : t.toUpperCase()}
               </Text>
             </Pressable>
           ))}
@@ -168,6 +167,7 @@ export function HealthChart({ history7d, history30d }: Props) {
           contentContainerStyle={[
             styles.scrollContent,
             timeframe === '7d' && { width: '100%', justifyContent: 'space-between' },
+            (timeframe === '30d' || timeframe === 'month') && { minWidth: '100%' },
           ]}
         >
           {currentData.map((item, idx) => {

@@ -2,6 +2,8 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from datetime import timedelta, datetime
 from typing import List
 import requests
@@ -15,7 +17,7 @@ from schemas import (
     OnboardingLabChoiceUpdate,
     OnboardingCompleteUpdate,
     PasswordResetRequest, PasswordReset,
-    Appointment, AppointmentCreate, AppointmentUpdate,
+    Appointment, AppointmentCreate, AppointmentUpdate, AppointmentStatus,
     MedicalRecord, MedicalRecordCreate, MedicalRecordUpdate,
     Medication, MedicationCreate, MedicationUpdate,
     Message, MessageCreate,
@@ -27,7 +29,7 @@ from schemas import (
     MealGlucosePredictResponse,
     DexcomImportReadingsBody,
 )
-from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, verify_password
+from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, normalize_email, verify_password
 from config import settings
 from deepseek_service import DeepSeekService
 import usda_fdc
@@ -37,7 +39,61 @@ import dexcom_integration
 from lab_onboarding import router as lab_onboarding_router
 from glucose_readings_router import router as glucose_readings_router
 from water_intake_router import router as water_intake_router
+from health_activity_router import router as health_activity_router
 from doctor_chat_router import router as doctor_chat_router
+from places_router import router as places_router
+from zoom_router import router as zoom_router
+from ocr_router import router as ocr_router
+from telehealth_service import (
+    TelehealthPlatform,
+    create_telehealth_meeting,
+    is_telehealth_visit,
+    provider_label,
+)
+
+# =================================================================
+# TELEHEALTH HELPERS
+# =================================================================
+
+async def _provision_telehealth_meeting(
+    *,
+    visit_mode: str | None,
+    telehealth_platform: str | None,
+    doctor_name: str,
+    appointment_date: datetime,
+    duration: int,
+    location: str | None = None,
+    db: Session | None = None,
+    require_meeting: bool = False,
+) -> dict:
+    if not is_telehealth_visit(visit_mode, location):
+        return {}
+    platform: TelehealthPlatform = "zoom"
+    label = provider_label(platform)
+    base_fields = {
+        "visit_mode": "telehealth",
+        "telehealth_platform": platform,
+        "location": f"Telehealth ({label})",
+    }
+    try:
+        meeting = await create_telehealth_meeting(
+            platform=platform,  # type: ignore[arg-type]
+            title=f"Telehealth with {doctor_name}",
+            start_at=appointment_date,
+            duration_minutes=duration,
+            db=db,
+        )
+        return {
+            **base_fields,
+            "meeting_url": meeting["url"],
+            "meeting_provider": meeting["provider"],
+            "meeting_id": meeting.get("meeting_id"),
+        }
+    except RuntimeError:
+        if require_meeting:
+            raise
+        return base_fields
+
 
 # =================================================================
 # GLOBAL API CONFIGURATION
@@ -56,10 +112,16 @@ async def startup_event():
     else:
         print("WARNING: DeepSeek API key is not set! Check your .env file.")
 
-# CORS middleware
+# CORS middleware — allow any localhost port in SQLite dev mode (Expo web uses varying ports)
+_dev_sqlite = settings.database_url.startswith("sqlite")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
+    allow_origin_regex=(
+        r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):\d+"
+        if _dev_sqlite
+        else None
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,7 +133,11 @@ create_tables()
 app.include_router(lab_onboarding_router)
 app.include_router(glucose_readings_router)
 app.include_router(water_intake_router)
+app.include_router(health_activity_router)
 app.include_router(doctor_chat_router)
+app.include_router(places_router)
+app.include_router(zoom_router)
+app.include_router(ocr_router)
 
 # Root endpoint
 @app.get("/")
@@ -90,18 +156,17 @@ async def health_check():
 @app.post("/auth/register", response_model=UserSchema)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
-    # Check if user already exists
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
+    email = normalize_email(user.email)
+
+    if existing := db.query(User).filter(func.lower(User.email) == email).first():
         raise HTTPException(
-            status_code=400,
-            detail="Email already registered"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
         )
-    
-    # Create new user
+
     hashed_password = get_password_hash(user.password)
     db_user = User(
-        email=user.email,
+        email=email,
         hashed_password=hashed_password,
         full_name=user.full_name,
         phone=user.phone,
@@ -110,19 +175,34 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         emergency_contact=user.emergency_contact,
         address=user.address,
         gender=user.gender,
+        is_active=True,
         onboarding_completed=False,
     )
-    
+
     db.add(db_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        ) from None
     db.refresh(db_user)
-    
+
     return db_user
 
 @app.post("/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Login and get access token."""
-    user = authenticate_user(db, form_data.username, form_data.password)
+    email = normalize_email(form_data.username)
+    if not email or not form_data.password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email and password are required",
+        )
+
+    user = authenticate_user(db, email, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -186,8 +266,8 @@ async def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
         return {"access_token": access_token, "token_type": "bearer"}
-    except requests.RequestException:
-        raise HTTPException(status_code=502, detail="Failed to verify token with Google")
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail="Failed to verify token with Google") from e
 
 # =================================================================
 # USER & PROFILE ENDPOINTS
@@ -283,14 +363,7 @@ async def forgot_password(
     db: Session = Depends(get_db)
 ):
     """Request password reset. In production, send email with reset token."""
-    user = db.query(User).filter(User.email == request.email).first()
-    if not user:
-        # Don't reveal if email exists for security
-        return {"message": "If the email exists, a password reset link has been sent."}
-    
-    # In production, generate reset token and send email
-    # For now, just return success message
-    # TODO: Implement email sending with reset token
+    db.query(User).filter(User.email == request.email).first()
     return {"message": "If the email exists, a password reset link has been sent."}
 
 @app.post("/auth/reset-password")
@@ -330,14 +403,6 @@ async def get_dashboard_data(
         AppointmentModel.appointment_date >= now
     ).order_by(AppointmentModel.appointment_date.asc()).limit(5).all()
     
-    # If no scheduled appointments, get any future appointments (excluding cancelled)
-    if not upcoming_appointments:
-        upcoming_appointments = db.query(AppointmentModel).filter(
-            AppointmentModel.patient_id == current_user.id,
-            AppointmentModel.appointment_date >= now,
-            AppointmentModel.status != "cancelled"
-        ).order_by(AppointmentModel.appointment_date.asc()).limit(5).all()
-    
     # Get recent medical records
     recent_records = db.query(MedicalRecordModel).filter(
         MedicalRecordModel.patient_id == current_user.id
@@ -355,13 +420,9 @@ async def get_dashboard_data(
     current_medications = db.query(MedicationModel).filter(
         MedicationModel.patient_id == current_user.id,
         MedicationModel.is_active == True
-    ).all()
-    
-    # If no active medications, get all medications
-    if not current_medications:
-        current_medications = db.query(MedicationModel).filter(
-            MedicationModel.patient_id == current_user.id
-        ).order_by(MedicationModel.created_at.desc()).limit(10).all()
+    ).all() or db.query(MedicationModel).filter(
+        MedicationModel.patient_id == current_user.id
+    ).order_by(MedicationModel.created_at.desc()).limit(10).all()
     
     # Get unread messages count
     unread_messages = db.query(MessageModel).filter(
@@ -405,10 +466,24 @@ async def create_appointment(
 ):
     """Create a new appointment."""
     appointment_dict = appointment.dict()
-    # Ensure status is set to "scheduled" for new appointments
     if 'status' not in appointment_dict or not appointment_dict.get('status'):
         appointment_dict['status'] = "scheduled"
-    
+
+    try:
+        telehealth_fields = await _provision_telehealth_meeting(
+            visit_mode=appointment_dict.get("visit_mode"),
+            telehealth_platform=appointment_dict.get("telehealth_platform"),
+            doctor_name=appointment_dict["doctor_name"],
+            appointment_date=appointment_dict["appointment_date"],
+            duration=appointment_dict.get("duration", 30),
+            location=appointment_dict.get("location"),
+            db=db,
+            require_meeting=False,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    appointment_dict.update(telehealth_fields)
+
     db_appointment = AppointmentModel(
         **appointment_dict,
         patient_id=current_user.id
@@ -425,11 +500,12 @@ async def get_appointment(
     db: Session = Depends(get_db)
 ):
     """Get a specific appointment."""
-    appointment = db.query(AppointmentModel).filter(
-        AppointmentModel.id == appointment_id,
-        AppointmentModel.patient_id == current_user.id
-    ).first()
-    if not appointment:
+    if not (
+        appointment := db.query(AppointmentModel).filter(
+            AppointmentModel.id == appointment_id,
+            AppointmentModel.patient_id == current_user.id
+        ).first()
+    ):
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appointment
 
@@ -448,13 +524,116 @@ async def update_appointment(
     if not db_appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
-    update_data = appointment_update.dict(exclude_unset=True)
+    update_data = appointment_update.model_dump(exclude_unset=True)
+
+    new_status = update_data.get("status")
+    if new_status in (AppointmentStatus.cancelled, "cancelled"):
+        db_appointment.status = AppointmentStatus.cancelled
+        db.commit()
+        db.refresh(db_appointment)
+        return db_appointment
+
     for key, value in update_data.items():
         setattr(db_appointment, key, value)
-    
+
+    visit_mode = update_data.get("visit_mode", db_appointment.visit_mode)
+    telehealth_platform = update_data.get("telehealth_platform", db_appointment.telehealth_platform)
+    appointment_date = update_data.get("appointment_date", db_appointment.appointment_date)
+    duration = update_data.get("duration", db_appointment.duration)
+    doctor_name = update_data.get("doctor_name", db_appointment.doctor_name)
+    location = update_data.get("location", db_appointment.location)
+
+    if is_telehealth_visit(visit_mode, location) and (
+        "appointment_date" in update_data
+        or "visit_mode" in update_data
+        or "telehealth_platform" in update_data
+    ) and not db_appointment.meeting_url:
+        try:
+            telehealth_fields = await _provision_telehealth_meeting(
+                visit_mode=visit_mode,
+                telehealth_platform=telehealth_platform,
+                doctor_name=doctor_name,
+                appointment_date=appointment_date,
+                duration=duration or 30,
+                location=location,
+                db=db,
+                require_meeting=False,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        for key, value in telehealth_fields.items():
+            setattr(db_appointment, key, value)
+
     db.commit()
     db.refresh(db_appointment)
     return db_appointment
+
+
+@app.post("/appointments/{appointment_id}/cancel", response_model=Appointment)
+async def cancel_appointment(
+    appointment_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Cancel an appointment without re-provisioning telehealth."""
+    db_appointment = db.query(AppointmentModel).filter(
+        AppointmentModel.id == appointment_id,
+        AppointmentModel.patient_id == current_user.id,
+    ).first()
+    if not db_appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    db_appointment.status = AppointmentStatus.cancelled
+    db.commit()
+    db.refresh(db_appointment)
+    return db_appointment
+
+@app.post("/appointments/{appointment_id}/telehealth/join")
+async def join_telehealth_appointment(
+    appointment_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Return (or create) the video meeting link for a telehealth appointment."""
+    if not (
+        db_appointment := db.query(AppointmentModel).filter(
+            AppointmentModel.id == appointment_id,
+            AppointmentModel.patient_id == current_user.id,
+        ).first()
+    ):
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if not is_telehealth_visit(db_appointment.visit_mode, db_appointment.location):
+        raise HTTPException(status_code=400, detail="This appointment is not a telehealth visit")
+
+    if db_appointment.meeting_url:
+        return {
+            "meeting_url": db_appointment.meeting_url,
+            "meeting_provider": db_appointment.meeting_provider,
+        }
+
+    try:
+        telehealth_fields = await _provision_telehealth_meeting(
+            visit_mode=db_appointment.visit_mode,
+            telehealth_platform=db_appointment.telehealth_platform,
+            doctor_name=db_appointment.doctor_name,
+            appointment_date=db_appointment.appointment_date,
+            duration=db_appointment.duration or 30,
+            location=db_appointment.location,
+            db=db,
+            require_meeting=True,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    for key, value in telehealth_fields.items():
+        setattr(db_appointment, key, value)
+    db.commit()
+    db.refresh(db_appointment)
+    return {
+        "meeting_url": db_appointment.meeting_url,
+        "meeting_provider": db_appointment.meeting_provider,
+    }
 
 @app.delete("/appointments/{appointment_id}")
 async def delete_appointment(
@@ -604,7 +783,7 @@ async def send_chat_message(
         return ai_message
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}") from e
 
 # =================================================================
 # CLINICAL MEAL / USDA / GLUCOSE ML (XGBoost + validation)
@@ -643,9 +822,9 @@ async def nutrition_usda_search(
     try:
         hits = usda_fdc.search_foods(q.strip(), page_size=page_size)
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except requests.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}")
+        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}") from e
 
     out = []
     for h in hits:
@@ -663,9 +842,9 @@ async def nutrition_usda_food_detail(
     try:
         detail = usda_fdc.get_food_detail(fdc_id)
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except requests.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}")
+        raise HTTPException(status_code=502, detail=f"USDA FoodData Central error: {e}") from e
 
     carbs = usda_fdc.extract_carbs_per_100g(detail)
     kcal = usda_fdc.extract_energy_kcal_per_100g(detail)
@@ -753,10 +932,9 @@ async def glucose_predict_meal(
         current_user.id,
     )
 
-    if direction == "likely_up" and delta_est < -35:
-        direction = "uncertain"
-        flags.append("model_vs_heuristic_mismatch")
-    elif direction == "likely_down" and delta_est > 35:
+    if (direction == "likely_up" and delta_est < -35) or (
+        direction == "likely_down" and delta_est > 35
+    ):
         direction = "uncertain"
         flags.append("model_vs_heuristic_mismatch")
 

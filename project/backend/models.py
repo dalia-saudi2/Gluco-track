@@ -48,6 +48,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    zoom_oauth = relationship("ZoomOAuthToken", back_populates="user", uselist=False)
     
     # Relationships: Links this user to their related data in other tables
     appointments = relationship("Appointment", back_populates="patient")
@@ -96,11 +98,47 @@ class Appointment(Base):
     notes = Column(Text)
     status = Column(String, default="scheduled")  # scheduled, completed, cancelled
     appointment_type = Column(String)  # consultation, follow-up, emergency
+    visit_mode = Column(String, default="in_person")  # in_person | telehealth
+    telehealth_platform = Column(String)  # zoom
+    meeting_url = Column(String)
+    meeting_provider = Column(String)  # zoom
+    meeting_id = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     patient = relationship("User", back_populates="appointments")
+
+class ZoomOAuthToken(Base):
+    """Encrypted Zoom OAuth tokens for clinician/host accounts."""
+    __tablename__ = "zoom_oauth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    access_token_enc = Column(Text, nullable=False)
+    refresh_token_enc = Column(Text, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    zoom_user_id = Column(String, nullable=True)
+    scope = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", back_populates="zoom_oauth")
+
+
+class ZoomConsultation(Base):
+    """Active or historical Zoom telemedicine sessions."""
+    __tablename__ = "zoom_consultations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    host_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    zoom_meeting_id = Column(String, nullable=False)
+    join_url = Column(String, nullable=False)
+    start_url = Column(String, nullable=True)
+    topic = Column(String, default="Medical Consultation")
+    status = Column(String, default="active")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class MedicalRecord(Base):
     """Stores clinical data including lab results, imaging reports, and summaries."""
@@ -422,6 +460,22 @@ class WaterIntakeLog(Base):
     logged_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     patient = relationship("User", backref="water_intake_logs")
+
+
+class HealthActivityDaily(Base):
+    """One row per authenticated user per calendar day — steps, sleep, calories from Health Connect."""
+    __tablename__ = "health_activity_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    activity_date = Column(Date, nullable=False, index=True)
+    steps = Column(Integer, nullable=False, default=0)
+    sleep_hours = Column(Float, nullable=False, default=0.0)
+    calories_burned = Column(Integer, nullable=False, default=0)
+    source = Column(String, nullable=False, default="health_connect")
+    synced_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    patient = relationship("User", backref="health_activity_daily")
 
 
 class DoctorConversation(Base):

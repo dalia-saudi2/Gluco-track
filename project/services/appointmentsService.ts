@@ -12,6 +12,9 @@ export interface Appointment {
   status: 'Upcoming' | 'Confirmed' | 'Completed' | 'Canceled';
   mode: 'in_person' | 'telehealth';
   type: string;
+  meetingUrl?: string;
+  meetingProvider?: string;
+  telehealthPlatform?: 'zoom';
 }
 
 class AppointmentsService {
@@ -58,12 +61,15 @@ class AppointmentsService {
       }
 
       // Determine mode (default to in_person, can be enhanced with backend data)
-      const mode: 'in_person' | 'telehealth' = apt.appointment_type?.includes('telehealth') ||
+      const mode: 'in_person' | 'telehealth' = apt.visit_mode === 'telehealth' ||
+        apt.appointment_type?.includes('telehealth') ||
         apt.location?.toLowerCase().includes('telehealth')
         ? 'telehealth' : 'in_person';
 
-      // Extract specialty from appointment type or use default
       const specialty = apt.appointment_type || 'General Practitioner';
+
+      const telehealthPlatform: 'zoom' | undefined =
+        mode === 'telehealth' ? 'zoom' : undefined;
 
       return {
         id: apt.id,
@@ -75,6 +81,9 @@ class AppointmentsService {
         status: status,
         mode: mode,
         type: apt.appointment_type || 'routine',
+        meetingUrl: apt.meeting_url,
+        meetingProvider: apt.meeting_provider,
+        telehealthPlatform,
       };
     });
   }
@@ -89,6 +98,8 @@ class AppointmentsService {
     location?: string;
     notes?: string;
     appointment_type?: string;
+    visit_mode?: 'in_person' | 'telehealth';
+    telehealth_platform?: 'zoom';
   }): Promise<Appointment> {
     try {
       const response = await apiClient.createAppointment(appointmentData);
@@ -110,6 +121,8 @@ class AppointmentsService {
     location?: string;
     notes?: string;
     appointment_type?: string;
+    visit_mode?: 'in_person' | 'telehealth';
+    telehealth_platform?: 'zoom';
     status?: 'scheduled' | 'completed' | 'cancelled';
   }): Promise<Appointment> {
     try {
@@ -127,10 +140,18 @@ class AppointmentsService {
    */
   async cancelAppointment(id: number): Promise<void> {
     try {
-      // Update appointment status to cancelled
-      await this.updateAppointment(id, { status: 'cancelled' });
+      await apiClient.cancelAppointment(id);
     } catch (error) {
       console.error('Error canceling appointment:', error);
+      throw error;
+    }
+  }
+
+  async joinTelehealthMeeting(id: number): Promise<{ meeting_url: string; meeting_provider?: string }> {
+    try {
+      return await apiClient.joinTelehealthMeeting(id);
+    } catch (error) {
+      console.error('Error joining telehealth meeting:', error);
       throw error;
     }
   }

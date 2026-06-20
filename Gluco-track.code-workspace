@@ -1,0 +1,11 @@
+{
+  "folders": [
+    {
+      "name": "Patient Portal",
+      "path": "project"
+    }
+  ],
+  "settings": {
+    "cSpell.words": ["groq", "Groq", "GROQ"]
+  }
+}

@@ -1,6 +1,9 @@
 # Local IDE settings
 .vscode/
 
+# Symlink/junction to project/node_modules (IDE plugin resolution)
+node_modules/
+
 # Accidental artifact folder (Cursor/VS Code variable leak)
 ${workspaceFolder}/
 

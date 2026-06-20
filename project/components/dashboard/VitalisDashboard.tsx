@@ -19,11 +19,9 @@ import {
   Sparkles,
   Bot,
   User,
-  Bell,
   Settings,
   AlertTriangle,
   X,
-  Eye,
   Footprints,
   Moon,
   GlassWater,
@@ -44,10 +42,15 @@ import {
   Check,
   Heart,
 } from 'lucide-react-native';
+import { RemindersBellButton } from './RemindersBellButton';
+import { NearbyPlacesSheet } from '../quickActions/NearbyPlacesSheet';
+import { CallDoctorSheet } from '../quickActions/CallDoctorSheet';
+import type { NearbyPlaceCategory } from '../../types/nearbyPlaces';
 import { CandyCard } from './CandyCard';
 import { GlucoseStabilityCard, type GlucoseDayPoint } from './GlucoseTrendChart';
 import { WaterIntakeCard } from './WaterIntakeCard';
 import { DoctorChatCard } from './DoctorChatCard';
+import { ActivityWeekCard } from './ActivityWeekCard';
 import { useNavigateToLabUpload } from '../../hooks/useNavigateToLabUpload';
 import { useNavigateToAppointments } from '../../hooks/useNavigateToAppointments';
 import { pickAndCall } from '../../utils/callContact';
@@ -103,6 +106,7 @@ export type VitalisDashboardProps = {
   patientId?: number;
   onUploadLab?: () => void;
   quickContacts?: QuickContacts | null;
+  isAuthenticated?: boolean;
 };
 
 const { ScreenThemeProvider, useScreenTheme } = createDashboardScreenTheme<ReturnType<typeof createStyles>>();
@@ -172,6 +176,7 @@ export function VitalisDashboard({
   patientId,
   onUploadLab,
   quickContacts,
+  isAuthenticated = false,
 }: VitalisDashboardProps) {
   const router = useRouter();
   const navigateToLabUpload = useNavigateToLabUpload();
@@ -189,6 +194,8 @@ export function VitalisDashboard({
   const showSidebar = width >= SIDEBAR_BREAKPOINT;
   const isWide = width >= 768;
   const [alertVisible, setAlertVisible] = useState(true);
+  const [nearbySheet, setNearbySheet] = useState<NearbyPlaceCategory | null>(null);
+  const [callDoctorVisible, setCallDoctorVisible] = useState(false);
 
   const firstName = useMemo(() => userName.split(' ')[0] || userName, [userName]);
   const greeting = useMemo(() => {
@@ -274,10 +281,7 @@ export function VitalisDashboard({
               )}
               <View style={s.topActions}>
                 <ThemeToggleButton />
-                <Pressable style={s.iconBtn}>
-                  <Bell size={20} color={D.onSurfaceVariant} />
-                  <View style={s.notifDot} />
-                </Pressable>
+                <RemindersBellButton iconBtnStyle={s.iconBtn} />
                 <Pressable style={s.iconBtn} onPress={() => router.push('/(tabs)/profile' as never)}>
                   <Settings size={20} color={D.onSurfaceVariant} />
                 </Pressable>
@@ -521,18 +525,18 @@ export function VitalisDashboard({
                     <SectionLabel>Quick Actions</SectionLabel>
                     <View style={s.quickGrid}>
                       {[
-                        { icon: Phone, label: 'Call Doctor', color: D.secondary, route: APPOINTMENTS_ROUTE },
+                        { icon: Phone, label: 'Call Doctor', color: D.secondary, action: () => setCallDoctorVisible(true) },
                         {
                           icon: FlaskConical,
                           label: 'Book Lab Test',
                           color: D.tertiary,
-                          action: () => pickAndCall('Call laboratory', contacts.labs),
+                          action: () => setNearbySheet('laboratory'),
                         },
                         {
                           icon: Pill,
                           label: 'Prescription Order',
                           color: D.secondary,
-                          action: () => pickAndCall('Call pharmacy', contacts.pharmacies),
+                          action: () => setNearbySheet('pharmacy'),
                         },
                         { icon: Upload, label: 'Upload Lab Test', color: D.primary, action: handleUploadLab },
                         {
@@ -633,20 +637,7 @@ export function VitalisDashboard({
 
               <View style={[s.grid3, isWide && s.grid3Wide, { paddingBottom: 100 }]}>
                 <CandyCard style={s.padCard}>
-                  <SectionLabel>Activity This Week</SectionLabel>
-                  <View style={s.heatGrid}>
-                    {['90', '40', '15', '65', '85', '25', '50', '30', '10', '0', '0', '0', '0', '0'].map((o, i) => (
-                      <View key={i} style={[s.heatCell, { backgroundColor: o === '0' ? D.surfaceContainer : `rgba(224,64,160,${Number(o) / 100})` }]} />
-                    ))}
-                  </View>
-                  <View style={s.stat3}>
-                    {[{ v: '3', l: 'Active days' }, { v: '142', l: 'Min / week' }, { v: '420', l: 'kcal burned' }].map((st) => (
-                      <View key={st.l} style={s.statBox}>
-                        <Text style={s.statVal}>{st.v}</Text>
-                        <Text style={s.statLbl}>{st.l}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  <ActivityWeekCard D={D} patientId={patientId} />
                 </CandyCard>
 
                 <CandyCard style={s.padCard}>
@@ -672,32 +663,6 @@ export function VitalisDashboard({
                     <Text style={s.tipText}><Text style={s.tipBold}>Tip: </Text>Sleep below 7h raises glucose variability. Try a consistent 10 PM bedtime.</Text>
                   </View>
                 </CandyCard>
-
-                <CandyCard style={s.padCard}>
-                  <View style={s.remHead}>
-                    <View style={s.cardHeadRow}>
-                      <Bell size={14} color={D.secondary} />
-                      <SectionLabel>Reminders</SectionLabel>
-                    </View>
-                    <Text style={s.viewAll}>View all →</Text>
-                  </View>
-                  {[
-                    { icon: Pill, title: 'Take Insulin Glargine', sub: 'Missed · 7:30 AM', accent: '#fff7ed', border: '#fed7aa', btn: 'Mark done', btnStyle: 'outline' },
-                    { icon: Eye, title: 'Book eye screening', sub: 'Retinopathy 68% — urgent', accent: 'rgba(224,64,160,0.05)', border: 'rgba(224,64,160,0.1)', btn: 'Book', btnStyle: 'primary' },
-                    { icon: GlassWater, title: 'Drink water now', sub: '1.3L remaining today', accent: D.surfaceContainerLow, border: D.outlineVariant, btn: '+250ml', btnStyle: 'outline' },
-                  ].map((rem, i) => (
-                    <View key={i} style={[s.remRow, { backgroundColor: rem.accent, borderColor: rem.border }]}>
-                      <View style={s.remIcon}><rem.icon size={14} color={D.primary} /></View>
-                      <View style={s.remBody}>
-                        <Text style={s.remTitle}>{rem.title}</Text>
-                        <Text style={s.remSub}>{rem.sub}</Text>
-                      </View>
-                      <Pressable style={[s.remBtn, rem.btnStyle === 'primary' && s.remBtnPrimary]}>
-                        <Text style={[s.remBtnText, rem.btnStyle === 'primary' && { color: D.onPrimary }]}>{rem.btn}</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </CandyCard>
               </View>
             </ScrollView>
           </View>
@@ -707,6 +672,17 @@ export function VitalisDashboard({
       <Pressable style={s.fab} onPress={() => router.push('/(tabs)/chatbot' as never)}>
         <Zap size={24} color={D.onPrimary} />
       </Pressable>
+
+      <NearbyPlacesSheet
+        visible={nearbySheet != null}
+        category={nearbySheet}
+        onClose={() => setNearbySheet(null)}
+      />
+      <CallDoctorSheet
+        visible={callDoctorVisible}
+        isAuthenticated={isAuthenticated}
+        onClose={() => setCallDoctorVisible(false)}
+      />
     </View>
     </ScreenThemeProvider>
   );
@@ -736,7 +712,6 @@ function createStyles(D: DashboardPalette) {
   topGreeting: { fontFamily: DF.bold, fontSize: 16, color: D.primary, flexShrink: 1 },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   iconBtn: { padding: 8, borderRadius: 999, position: 'relative' },
-  notifDot: { position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: D.primary, borderWidth: 2, borderColor: D.surface },
   userChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: D.surface, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: D.borderSubtle },
   userChipText: { alignItems: 'flex-end' },
   userChipName: { fontFamily: DF.bold, fontSize: 11, color: D.onSurface },
@@ -858,12 +833,6 @@ function createStyles(D: DashboardPalette) {
   insightText: { flex: 1, fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, lineHeight: 15 },
   primaryFullBtn: { marginTop: 8, backgroundColor: D.primary, paddingVertical: 10, borderRadius: 999, alignItems: 'center' },
   primaryFullBtnText: { fontFamily: DF.bold, fontSize: 10, color: D.onPrimary },
-  heatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 12 },
-  heatCell: { width: '12%', aspectRatio: 1, borderRadius: 6 },
-  stat3: { flexDirection: 'row', gap: 8 },
-  statBox: { flex: 1, backgroundColor: D.surfaceContainer, borderRadius: 12, padding: 8, alignItems: 'center' },
-  statVal: { fontFamily: DF.bold, fontSize: 16, color: D.primary },
-  statLbl: { fontFamily: DF.bold, fontSize: 8, color: D.onSurfaceVariant, textTransform: 'uppercase', marginTop: 2 },
   sleepRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   sleepScore: { alignItems: 'center' },
   sleepNum: { fontFamily: DF.bold, fontSize: 28, color: D.primary },
@@ -874,16 +843,6 @@ function createStyles(D: DashboardPalette) {
   tipBox: { backgroundColor: D.surfaceContainerLow, borderRadius: 12, padding: 10 },
   tipText: { fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, lineHeight: 15 },
   tipBold: { fontFamily: DF.bold, color: D.primary },
-  remHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  viewAll: { fontFamily: DF.bold, fontSize: 9, color: D.primary },
-  remRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
-  remIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: D.surfaceContainer, alignItems: 'center', justifyContent: 'center' },
-  remBody: { flex: 1 },
-  remTitle: { fontFamily: DF.bold, fontSize: 10, color: D.onSurface },
-  remSub: { fontFamily: DF.medium, fontSize: 9, color: D.onSurfaceVariant },
-  remBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: D.surface, borderWidth: 1, borderColor: D.outlineVariant },
-  remBtnPrimary: { backgroundColor: D.primary, borderColor: D.primary },
-  remBtnText: { fontFamily: DF.bold, fontSize: 8, color: D.onSurfaceVariant },
   fab: {
     position: 'absolute',
     bottom: 24,

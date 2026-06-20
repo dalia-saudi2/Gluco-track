@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Allow access to read steps, sleep, and active calories for health tracking."
+        "NSHealthShareUsageDescription": "Allow access to read steps, sleep, and active calories for health tracking.",
+        "NSLocationWhenInUseUsageDescription": "Your location is used to find nearby pharmacies and laboratories."
       },
       "entitlements": {
         "com.apple.developer.healthkit": true
@@ -19,11 +20,15 @@
       "bundleIdentifier": "com.mahmovdsayed.patient-portal"
     },
     "android": {
+      "package": "com.mahmovdsayed.patientportal",
       "permissions": [
         "android.permission.health.READ_STEPS",
         "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
         "android.permission.health.READ_SLEEP",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -36,13 +41,35 @@
       "expo-font",
       "expo-web-browser",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to analyze meals for diabetes management."
         }
       ],
       "react-native-health",
-      "react-native-health-connect"
+      "react-native-health-connect",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to find nearby pharmacies and laboratories."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/sounds/hydration-reminder.mp3"]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

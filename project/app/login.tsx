@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -21,12 +21,11 @@ import { authService } from '../services/authService';
 import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
 import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
+import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
+import { isGoogleAuthSupported } from '../utils/secureContext';
+import { validateLogin } from '../utils/authValidation';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_CLIENT_ID = '784519257059-3pa0ibn4ege37ii6spbo7csdkav7srh0.apps.googleusercontent.com';
 const SPLIT_BREAKPOINT = 900;
 
 export default function LoginScreen() {
@@ -35,33 +34,12 @@ export default function LoginScreen() {
   const { width, height } = useWindowDimensions();
   const isSplit = width >= SPLIT_BREAKPOINT;
   const isCompact = !isSplit || height < 760;
-
-  const redirectUri = makeRedirectUri({ path: 'auth' });
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: GOOGLE_CLIENT_ID,
-    webClientId: GOOGLE_CLIENT_ID,
-    redirectUri,
-    responseType: 'id_token',
-  });
+  const googleAuthSupported = isGoogleAuthSupported();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const id_token = response.authentication?.idToken || response.params?.id_token;
-      if (id_token) {
-        handleGoogleLogin(id_token);
-      } else {
-        showToast.error('Google Login', 'No ID Token found');
-      }
-    } else if (response?.type === 'error') {
-      showToast.error('Google Login', 'Authentication failed');
-    }
-  }, [response]);
 
   const handleGoogleLogin = async (token: string) => {
     try {
@@ -81,14 +59,15 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      showToast.error('Error', 'Please enter both email and password.');
+    const validation = validateLogin(email, password);
+    if (!validation.ok) {
+      showToast.error('Error', validation.message);
       return;
     }
 
     try {
       setIsLoading(true);
-      await login(email, password);
+      await login(validation.email, password);
       const currentUser = await authService.getCurrentUser();
       if (!needsOnboarding(currentUser)) {
         showToast.success('Welcome Back', 'Logged in successfully.');
@@ -179,26 +158,22 @@ export default function LoginScreen() {
                   )}
                 </Pressable>
 
-                <View style={[styles.dividerRow, isCompact && styles.dividerRowCompact]}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>OR</Text>
-                  <View style={styles.dividerLine} />
-                </View>
+                {googleAuthSupported ? (
+                  <>
+                    <View style={[styles.dividerRow, isCompact && styles.dividerRowCompact]}>
+                      <View style={styles.dividerLine} />
+                      <Text style={styles.dividerText}>OR</Text>
+                      <View style={styles.dividerLine} />
+                    </View>
 
-                <Pressable
-                  onPress={() => promptAsync()}
-                  disabled={!request || isLoading}
-                  style={({ pressed }) => [
-                    styles.googleBtn,
-                    isCompact && styles.googleBtnCompact,
-                    pressed && styles.googleBtnPressed,
-                  ]}
-                >
-                  <View style={styles.googleBadge}>
-                    <Text style={styles.googleG}>G</Text>
-                  </View>
-                  <Text style={styles.googleText}>Sign in with Google</Text>
-                </Pressable>
+                    <GoogleSignInButton
+                      isCompact={isCompact}
+                      isLoading={isLoading}
+                      onIdToken={handleGoogleLogin}
+                      onError={(message) => showToast.error('Google Login', message)}
+                    />
+                  </>
+                ) : null}
               </View>
 
               <Pressable
@@ -404,39 +379,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: C.onSurfaceVariant,
     letterSpacing: 1,
-  },
-  googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.outlineVariant,
-    backgroundColor: C.surfaceContainerLowest,
-    gap: 8,
-  },
-  googleBtnCompact: {
-    height: 44,
-  },
-  googleBtnPressed: { backgroundColor: C.surfaceContainerLow },
-  googleBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: C.surfaceContainerLow,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleG: {
-    fontFamily: F.bold,
-    fontSize: 15,
-    color: '#EA4335',
-  },
-  googleText: {
-    fontFamily: F.bold,
-    fontSize: 14,
-    color: C.onSurface,
   },
   footerPill: {
     alignSelf: 'center',

@@ -1,0 +1,20 @@
+# Paddle OCR microservice ONLY — use a SEPARATE venv (see setup_venvs.ps1).
+# On Windows, paddlepaddle needs protobuf<=3.20.2; the main API needs protobuf>=4.x.
+# They cannot share one Python environment.
+
+fastapi>=0.115.0
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+requests==2.32.3
+pypdf>=4.0.0
+protobuf==3.20.2
+setuptools>=65.0.0
+
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+pymupdf>=1.24.0
+
+# Optional fallback when Paddle service is down
+pytesseract>=0.3.10

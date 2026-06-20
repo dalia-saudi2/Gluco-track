@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Alert, Linking } from 'react-native';
 import { Download, Calendar, MessageCircle, X, Share } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
@@ -221,6 +221,14 @@ export default function RecordsScreen() {
     }
   }, [isAuthenticated, authIsLoading]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated && !authIsLoading) {
+        fetchData();
+      }
+    }, [isAuthenticated, authIsLoading, fetchData])
+  );
+
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     fetchData();
@@ -317,7 +325,7 @@ export default function RecordsScreen() {
       onRefresh={handleRefresh}
       onRetry={fetchData}
       onLogout={handleLogout}
-      onUpload={() => router.push('/onboarding/lab-upload' as never)}
+      onUpload={() => router.push('/records-upload')}
       onExportAll={() => Alert.alert('Export', 'Exporting all records...')}
       onViewHistory={(item) => {
         setModalData({ data: item, type: 'history' });

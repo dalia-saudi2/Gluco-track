@@ -39,7 +39,7 @@ function RiskGauge({
   return (
     <Svg width={size} height={size}>
       <Circle cx={cx} cy={cy} r={r} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
-      <G rotation="-90" origin={`${cx}, ${cy}`}>
+      <G transform={`rotate(-90, ${cx}, ${cy})`}>
         <Circle
           cx={cx}
           cy={cy}

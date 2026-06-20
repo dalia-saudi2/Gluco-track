@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
-import { GlassWater } from 'lucide-react-native';
+import { Check, GlassWater, Timer } from 'lucide-react-native';
 import { DF, type DashboardPalette } from '../../constants/DashboardColors';
 import { waterIntakeService } from '../../services/waterIntakeService';
+import { useHydrationReminder } from '../../contexts/HydrationReminderContext';
+import { showToast } from '../ToastProvider';
 import type { WaterIntakeToday } from '../../types/waterIntake';
 
 const QUICK_ADD_OPTIONS = [250, 500, 750] as const;
+const CONFIRM_GLASS_ML = 250;
 
 type Props = {
   D: DashboardPalette;
@@ -20,9 +23,9 @@ function formatLiters(ml: number): string {
 }
 
 function formatLastLogged(iso: string | null | undefined): string {
-  if (!iso) return 'Tap a glass or quick add to log water';
+  if (!iso) return 'Confirm below when you drink water';
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return 'Tap a glass or quick add to log water';
+  if (Number.isNaN(then)) return 'Confirm below when you drink water';
   const mins = Math.floor((Date.now() - then) / 60000);
   if (mins < 1) return 'Last logged just now';
   if (mins < 60) return `Last logged ${mins} min ago`;
@@ -35,6 +38,7 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
   const [data, setData] = useState<WaterIntakeToday | null>(null);
   const [loading, setLoading] = useState(Boolean(patientId));
   const [adding, setAdding] = useState(false);
+  const { countdownLabel, hasStarted, isDue, confirmDrink, syncFromServer } = useHydrationReminder();
 
   const load = useCallback(async () => {
     if (!patientId) {
@@ -46,12 +50,13 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
       const today = await waterIntakeService.getToday(patientId);
       setData(today);
       onIntakeChange?.(today);
+      await syncFromServer(today.last_logged_at);
     } catch {
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [patientId, onIntakeChange]);
+  }, [patientId, onIntakeChange, syncFromServer]);
 
   useEffect(() => {
     void load();
@@ -68,17 +73,23 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
   const filledGlasses = data?.glasses_filled ?? 0;
   const cupsEquivalent = data?.cups_equivalent ?? 0;
 
-  const addWater = async (ml: number) => {
+  const logWaterAndConfirm = async (ml: number) => {
     if (!patientId || adding) return;
     try {
       setAdding(true);
       const updated = await waterIntakeService.add(patientId, ml);
       setData(updated);
       onIntakeChange?.(updated);
+      await confirmDrink();
+      showToast.success('Water logged', `${ml}ml recorded · 2-hour timer started`);
+    } catch {
+      showToast.error('Water intake', 'Could not log water. Please try again.');
     } finally {
       setAdding(false);
     }
   };
+
+  const handleConfirmDrink = () => void logWaterAndConfirm(CONFIRM_GLASS_ML);
 
   if (loading) {
     return (
@@ -107,7 +118,42 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
         </View>
       </View>
 
+      <Pressable
+        style={({ pressed }) => [s.confirmBtn, pressed && s.confirmBtnPressed, adding && s.confirmBtnDisabled]}
+        onPress={handleConfirmDrink}
+        disabled={adding || !patientId}
+        accessibilityLabel="I drank water"
+      >
+        {adding ? (
+          <ActivityIndicator color={D.onPrimary} />
+        ) : (
+          <>
+            <Check size={18} color={D.onPrimary} />
+            <Text style={s.confirmBtnText}>I drank water</Text>
+          </>
+        )}
+      </Pressable>
+
       <Text style={s.lastLogged}>{formatLastLogged(data?.last_logged_at)}</Text>
+
+      <View style={[s.reminderBox, isDue && s.reminderBoxDue]}>
+        <View style={s.reminderHead}>
+          <Timer size={14} color={isDue ? D.orange : D.tertiary} />
+          <Text style={[s.reminderTitle, isDue && s.reminderTitleDue]}>
+            {isDue ? 'Hydration overdue' : 'Next reminder in'}
+          </Text>
+        </View>
+        <Text style={[s.countdown, isDue && s.countdownDue]}>
+          {hasStarted ? countdownLabel : '02:00:00'}
+        </Text>
+        <Text style={s.reminderHint}>
+          {hasStarted
+            ? isDue
+              ? 'A sound and notification repeat every 2 hours until you confirm water again.'
+              : 'Timer resets each time you tap “I drank water”.'
+            : 'Tap “I drank water” to start your 2-hour hydration timer.'}
+        </Text>
+      </View>
 
       <View style={s.glassGrid}>
         {[0, 1].map((row) => (
@@ -119,7 +165,7 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
                 <Pressable
                   key={i}
                   style={s.glassCell}
-                  onPress={() => void addWater(250)}
+                  onPress={() => void logWaterAndConfirm(CONFIRM_GLASS_ML)}
                   disabled={adding || !patientId}
                 >
                   <GlassWater
@@ -146,7 +192,7 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
           <Pressable
             key={ml}
             style={({ pressed }) => [s.quickBtn, (pressed || adding) && s.quickBtnPressed]}
-            onPress={() => void addWater(ml)}
+            onPress={() => void logWaterAndConfirm(ml)}
             disabled={adding || !patientId}
           >
             <Text style={s.quickBtnText}>{ml}ml</Text>
@@ -192,6 +238,23 @@ function createStyles(D: DashboardPalette) {
       color: D.onSurfaceVariant,
       marginTop: 4,
     },
+    confirmBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: D.tertiary,
+      borderRadius: 999,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    confirmBtnPressed: { opacity: 0.9 },
+    confirmBtnDisabled: { opacity: 0.7 },
+    confirmBtnText: {
+      fontFamily: DF.bold,
+      fontSize: 14,
+      color: D.onPrimary,
+    },
     lastLogged: {
       fontFamily: DF.medium,
       fontSize: 11,
@@ -202,6 +265,42 @@ function createStyles(D: DashboardPalette) {
       backgroundColor: D.surfaceContainerLow,
       borderWidth: 1,
       borderColor: D.outlineVariant,
+    },
+    reminderBox: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      backgroundColor: 'rgba(0,150,204,0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(0,150,204,0.2)',
+      gap: 4,
+    },
+    reminderBoxDue: {
+      backgroundColor: 'rgba(251,146,60,0.1)',
+      borderColor: 'rgba(251,146,60,0.35)',
+    },
+    reminderHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    reminderTitle: {
+      fontFamily: DF.bold,
+      fontSize: 10,
+      color: D.tertiary,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+    },
+    reminderTitleDue: { color: D.orange },
+    countdown: {
+      fontFamily: DF.bold,
+      fontSize: 28,
+      color: D.tertiary,
+      letterSpacing: 2,
+      marginTop: 2,
+    },
+    countdownDue: { color: D.orange },
+    reminderHint: {
+      fontFamily: DF.medium,
+      fontSize: 10,
+      color: D.onSurfaceVariant,
+      lineHeight: 14,
     },
     iconCircle: {
       width: 40,

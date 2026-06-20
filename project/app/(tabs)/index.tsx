@@ -33,7 +33,7 @@ export default function DashboardScreen() {
   const [glucoseHistoryOpen, setGlucoseHistoryOpen] = useState(false);
 
   const { status } = useHealthPermissions();
-  const { today } = useHealth(status);
+  const { today } = useHealth(status, { patientId: user?.id, isAuthenticated });
   const navigateToLabUpload = useNavigateToLabUpload();
 
   const loadGlucose = useCallback(async () => {
@@ -150,6 +150,7 @@ export default function DashboardScreen() {
         patientId={user?.id}
         onUploadLab={navigateToLabUpload}
         quickContacts={user?.quick_contacts ?? null}
+        isAuthenticated={isAuthenticated}
       />
       <GlucoseHistoryModal
         visible={glucoseHistoryOpen}

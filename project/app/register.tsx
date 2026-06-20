@@ -30,6 +30,7 @@ import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
 import { AuthTextField } from '../components/auth/AuthTextField';
 import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
 import { authService } from '../services/authService';
+import { validateRegistration } from '../utils/authValidation';
 
 const SPLIT_BREAKPOINT = 900;
 
@@ -50,25 +51,23 @@ export default function RegisterScreen() {
   const [confirmFocused, setConfirmFocused] = useState(false);
 
   const handleRegister = async () => {
-    if (!name.trim() || !phone.trim() || !email.trim() || !password) {
-      showToast.error('Validation Error', 'Please fill in all required fields.');
-      return;
-    }
+    const validation = validateRegistration({
+      name,
+      email,
+      phone,
+      password,
+      confirmPassword,
+    });
 
-    if (password.length < 6) {
-      showToast.error('Validation Error', 'Password must be at least 6 characters.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      showToast.error('Password Mismatch', 'Passwords do not match.');
+    if (!validation.ok) {
+      showToast.error('Validation Error', validation.message);
       return;
     }
 
     try {
       setIsLoading(true);
       await register({
-        email: email.trim(),
+        email: validation.email,
         password,
         full_name: name.trim(),
         phone: phone.trim(),

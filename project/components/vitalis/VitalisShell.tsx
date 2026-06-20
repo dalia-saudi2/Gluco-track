@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Bell, Settings, LogOut } from 'lucide-react-native';
+import { Settings, LogOut } from 'lucide-react-native';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
 import { VITALIS_NAV, VitalisNavId } from './vitalisNav';
@@ -18,6 +18,7 @@ import { DiabetesCareHubBrand } from '../brand/DiabetesCareHubBrand';
 import { MobileMenuButton } from './MobileMenuButton';
 import { createSidebarStyles } from './MobileNavDrawer';
 import { ThemeToggleButton } from './ThemeToggleButton';
+import { RemindersBellButton } from '../dashboard/RemindersBellButton';
 
 const SIDEBAR_BREAKPOINT = 1024;
 
@@ -111,10 +112,7 @@ export function VitalisShell({
               <View style={styles.topActions}>
                 {headerExtra}
                 <ThemeToggleButton />
-                <Pressable style={styles.iconBtn}>
-                  <Bell size={20} color={D.onSurfaceVariant} />
-                  <View style={styles.notifDot} />
-                </Pressable>
+                <RemindersBellButton iconBtnStyle={styles.iconBtn} />
                 <Pressable style={styles.iconBtn} onPress={() => router.push('/(tabs)/profile' as never)}>
                   <Settings size={20} color={D.onSurfaceVariant} />
                 </Pressable>
@@ -176,17 +174,6 @@ function createShellStyles(D: DashboardPalette) {
     topBarEnd: { justifyContent: 'flex-end' as const },
     topActions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
     iconBtn: { padding: 8, borderRadius: 999, position: 'relative' as const },
-    notifDot: {
-      position: 'absolute' as const,
-      top: 8,
-      right: 8,
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: D.primary,
-      borderWidth: 2,
-      borderColor: D.surface,
-    },
     userChip: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,

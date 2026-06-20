@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { ShieldAlert, AlertTriangle, Settings, RefreshCw, Heart } from 'lucide-react-native';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
@@ -12,6 +12,8 @@ type Props = {
   onRequestAccess: () => void;
   onOpenSettings: () => void;
   onEnableSimulation?: () => void;
+  onInstallHealthConnect?: () => void;
+  needsHealthConnectInstall?: boolean;
 };
 
 export function HealthErrorState({
@@ -20,7 +22,9 @@ export function HealthErrorState({
   onRetry,
   onRequestAccess,
   onOpenSettings,
-  onEnableSimulation
+  onEnableSimulation,
+  onInstallHealthConnect,
+  needsHealthConnectInstall,
 }: Props) {
   const D = useD();
   const styles = useDashboardStyles(createStyles);
@@ -35,9 +39,19 @@ export function HealthErrorState({
             </View>
             <Text style={styles.title}>Health Services Unavailable</Text>
             <Text style={styles.message}>
-              Apple Health (iOS) or Health Connect (Android) is not supported or not enabled on this device.
+              {Platform.OS === 'android'
+                ? needsHealthConnectInstall
+                  ? 'Install or update Google Health Connect, then open this app from the installed APK (not the phone browser).'
+                  : 'Health Connect requires the native Android app. Build and install the app on your phone, then grant permissions.'
+                : 'Apple Health (iOS) or Health Connect (Android) is not supported or not enabled on this device.'}
             </Text>
-            {onEnableSimulation && (
+            {Platform.OS === 'android' && onInstallHealthConnect && (
+              <Pressable style={styles.primaryBtn} onPress={onInstallHealthConnect}>
+                <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />
+                <Text style={styles.primaryBtnText}>Install Health Connect</Text>
+              </Pressable>
+            )}
+            {onEnableSimulation && Platform.OS === 'web' && (
               <Pressable style={styles.primaryBtn} onPress={onEnableSimulation}>
                 <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />
                 <Text style={styles.primaryBtnText}>Enable Demo/Simulation Mode</Text>
@@ -54,7 +68,9 @@ export function HealthErrorState({
             </View>
             <Text style={styles.title}>Permission Required</Text>
             <Text style={styles.message}>
-              To show your sleep hours, steps, and active calories, we need read permissions for your device's native health database.
+              {Platform.OS === 'android'
+                ? 'Allow read access to steps, active calories, and sleep in Health Connect.'
+                : 'To show your sleep hours, steps, and active calories, we need read permissions for your device\'s native health database.'}
             </Text>
             <Pressable style={styles.primaryBtn} onPress={onRequestAccess}>
               <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />

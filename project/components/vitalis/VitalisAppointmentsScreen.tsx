@@ -32,6 +32,7 @@ import { useD } from '../../hooks/useDashboardTheme';
 import { createDashboardScreenTheme } from '../../hooks/dashboardScreenTheme';
 import { VitalisShell } from './VitalisShell';
 import { Appointment } from '../../services/appointmentsService';
+import { telehealthPlatformLabel, joinButtonLabel } from '../../utils/telehealthMeeting';
 
 type SubTab = 'upcoming' | 'past' | 'canceled' | 'schedule';
 
@@ -60,7 +61,7 @@ type Props = {
   onScheduleNew: () => void;
   onReschedule: (id: number) => void;
   onCancel: (id: number) => void;
-  onJoinTelehealth: () => void;
+  onJoinTelehealth: (appointment: Appointment) => void;
   onBookFollowUp: () => void;
   bookingModal: ReactNode;
 };
@@ -136,7 +137,7 @@ function AppointmentCard({
   accentColor: string;
   onReschedule?: () => void;
   onCancel?: () => void;
-  onJoin?: () => void;
+  onJoin?: (appointment: Appointment) => void;
   onShare?: () => void;
   showReminder?: boolean;
 }) {
@@ -199,7 +200,11 @@ function AppointmentCard({
               <View>
                 <Text style={s.detailLbl}>Location</Text>
                 <Text style={[s.detailVal, isTelehealth && s.detailItalic]}>
-                  {isTelehealth ? 'Telehealth Visit' : appointment.location}
+                  {isTelehealth
+                    ? appointment.meetingUrl
+                      ? `${telehealthPlatformLabel(appointment.telehealthPlatform)} · Scheduled`
+                      : 'Telehealth Visit'
+                    : appointment.location}
                 </Text>
               </View>
             </View>
@@ -235,9 +240,9 @@ function AppointmentCard({
               </Pressable>
             )}
             {onJoin && isTelehealth && (
-              <Pressable style={s.joinAction} onPress={onJoin}>
+              <Pressable style={s.joinAction} onPress={() => onJoin(appointment)}>
                 <Video size={14} color={D.secondary} />
-                <Text style={s.joinActionText}>Join Online</Text>
+                <Text style={s.joinActionText}>{joinButtonLabel(appointment.telehealthPlatform)}</Text>
               </Pressable>
             )}
           </View>
@@ -366,7 +371,7 @@ export function VitalisAppointmentsScreen({
           showReminder
           onReschedule={() => onReschedule(appt.id)}
           onCancel={() => onCancel(appt.id)}
-          onJoin={onJoinTelehealth}
+          onJoin={(appt) => onJoinTelehealth(appt)}
           onShare={() => handleShare(appt)}
         />
       ));

@@ -18,7 +18,7 @@ from database import get_db
 from diabetes_staging_service import predict_from_measurement
 from feature_constants import LAB_FEATURE_KEYS, TOTAL_FEATURES, activity_level_from_minutes, count_filled_features, profile_completeness_pct
 from lab_reminder_service import cancel_lab_reminders, ensure_pinned_lab_action, schedule_lab_reminders
-from models import DiabetesPrediction, LabUpload, PatientClinicalProfile, PatientMeasurement, User
+from models import DiabetesPrediction, LabUpload, MedicalRecord, PatientClinicalProfile, PatientMeasurement, User
 from patient_sync import sync_patient_from_user
 from risk_summary import build_risk_summary
 from ocr_service import process_lab_file
@@ -45,6 +45,68 @@ def _demographics_done(user: User) -> bool:
     return bool(
         (user.date_of_birth is not None)
         or (user.age is not None and user.age > 0)
+    )
+
+
+def _can_upload_lab_report(user: User) -> bool:
+    return bool(
+        user.onboarding_lab_opt_in is True
+        or user.lab_upload_pending
+        or user.onboarding_completed
+    )
+
+
+def _summary_from_ocr(extracted: dict) -> str:
+    parts: list[str] = []
+    for key, cell in extracted.items():
+        if isinstance(cell, dict) and cell.get("value") is not None:
+            label = key.replace("_", " ").title()
+            parts.append(f"{label}: {cell['value']}")
+    if parts:
+        return "; ".join(parts[:8])
+    return "Uploaded report — values extracted from your document."
+
+
+def _sync_medical_record_from_lab_upload(db: Session, user: User, upload: LabUpload) -> None:
+    extracted = upload.ocr_extracted_values or {}
+    summary = _summary_from_ocr(extracted)
+    title = "Lab Report"
+    if upload.file_type == "pdf":
+        title = "Lab Report (PDF)"
+    elif upload.file_type in {"jpeg", "jpg", "png"}:
+        title = "Lab Report (Scan)"
+
+    existing = (
+        db.query(MedicalRecord)
+        .filter(MedicalRecord.patient_id == user.id, MedicalRecord.file_url == upload.file_url)
+        .first()
+    )
+    if existing:
+        existing.content = summary
+        existing.record_data = {
+            "lab_upload_id": upload.id,
+            "ocr_status": upload.ocr_status,
+            "ocr_extracted_values": extracted,
+        }
+        existing.updated_at = datetime.utcnow()
+        return
+
+    db.add(
+        MedicalRecord(
+            patient_id=user.id,
+            record_type="lab",
+            title=title,
+            date=datetime.utcnow(),
+            provider=user.full_name or "Self-uploaded",
+            status="new",
+            file_url=upload.file_url,
+            content=summary,
+            record_data={
+                "lab_upload_id": upload.id,
+                "ocr_status": upload.ocr_status,
+                "ocr_extracted_values": extracted,
+            },
+        )
     )
 
 
@@ -177,8 +239,11 @@ async def upload_lab_report(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    if current_user.onboarding_lab_opt_in is not True and not current_user.lab_upload_pending:
-        raise HTTPException(status_code=400, detail="Lab upload is only for users who opted into OCR onboarding or have a pending lab upload.")
+    if not _can_upload_lab_report(current_user):
+        raise HTTPException(
+            status_code=400,
+            detail="Lab upload is not available for this account yet. Complete onboarding first.",
+        )
 
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
@@ -204,12 +269,22 @@ async def upload_lab_report(
     db.commit()
     db.refresh(upload)
 
-    ocr_result = process_lab_file(dest, file_type)
+    try:
+        ocr_result = process_lab_file(dest, file_type)
+    except Exception as ocr_exc:
+        ocr_result = {
+            "ocr_status": "partial",
+            "ocr_raw_output": {"engine": "error", "error": str(ocr_exc)[:300]},
+            "ocr_extracted_values": {},
+            "ocr_confidence_score": 0.0,
+        }
     upload.ocr_status = ocr_result["ocr_status"]
     upload.ocr_raw_output = ocr_result["ocr_raw_output"]
     upload.ocr_extracted_values = ocr_result["ocr_extracted_values"]
     upload.ocr_confidence_score = ocr_result["ocr_confidence_score"]
     upload.processed_at = datetime.utcnow()
+    if current_user.onboarding_completed:
+        _sync_medical_record_from_lab_upload(db, current_user, upload)
     db.commit()
     db.refresh(upload)
     return upload

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { Info, ArrowRight } from 'lucide-react-native';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
@@ -22,12 +22,16 @@ export function HealthPermissionBanner({ isSimulated, onRequestPermissions }: Pr
         <View style={styles.textWrap}>
           <Text style={styles.title}>Running in Simulation Mode</Text>
           <Text style={styles.description}>
-            This environment does not support native Health APIs. Data is simulated locally.
+            {Platform.OS === 'android'
+              ? 'Install the native app and connect Health Connect for real step, sleep, and calorie data.'
+              : 'This environment does not support native Health APIs. Data is simulated locally.'}
           </Text>
         </View>
       </View>
       <Pressable style={styles.btn} onPress={onRequestPermissions}>
-        <Text style={styles.btnText}>Connect Health Kit</Text>
+        <Text style={styles.btnText}>
+          {Platform.OS === 'android' ? 'Connect Health Connect' : 'Connect Health Kit'}
+        </Text>
         <ArrowRight size={12} color={D.primary} />
       </Pressable>
     </View>

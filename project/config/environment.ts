@@ -7,40 +7,54 @@ import { storageService } from '../services/storageService';
 // On iOS simulator: use localhost
 // On physical device: use your computer's IP address
 
+const PHYSICAL_DEVICE_IP = 'http://192.168.1.9:8000'; // Your PC's LAN IP — phone must be on same Wi‑Fi
+
+/** When opened on phone browser at http://192.168.x.x:8084, API must use same host, not localhost. */
+function getWebLanApiUrl(): string | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return null;
+  }
+  const host = window.location.hostname;
+  if (host && host !== 'localhost' && host !== '127.0.0.1') {
+    return `http://${host}:8000`;
+  }
+  return null;
+}
+
 const getDefaultApiUrl = () => {
-  // Check if we're in development
+  const webLan = getWebLanApiUrl();
+  if (webLan) {
+    return webLan;
+  }
+
   const isDev = __DEV__;
   
   if (Platform.OS === 'android') {
-    // Android emulator uses 10.0.2.2 to access host machine's localhost
     return isDev ? 'http://10.0.2.2:8000' : 'https://api.yourdomain.com';
-  } else if (Platform.OS === 'ios') {
-    // iOS simulator can use localhost
-    return isDev ? 'http://localhost:8000' : 'https://api.yourdomain.com';
-  } else {
-    // Web or other platforms
+  }
+  if (Platform.OS === 'ios') {
     return isDev ? 'http://localhost:8000' : 'https://api.yourdomain.com';
   }
+  return isDev ? 'http://localhost:8000' : 'https://api.yourdomain.com';
 };
-
-// For physical device testing, you can set this manually
-// Example: 'http://192.168.1.100:8000' (replace with your computer's IP)
-// To find your IP: Windows (ipconfig) or Mac/Linux (ifconfig)
-const PHYSICAL_DEVICE_IP = null; // Set this to your computer's IP when testing on physical device
-// Example: const PHYSICAL_DEVICE_IP = 'http://192.168.1.100:8000';
 
 class EnvironmentConfig {
   private apiBaseUrl: string | null = null;
 
   async initialize() {
-    // Try to get saved API URL from storage
+    const webLan = getWebLanApiUrl();
+    if (webLan) {
+      this.apiBaseUrl = webLan;
+      await storageService.saveApiBaseUrl(webLan);
+      return;
+    }
+
     const savedUrl = await storageService.getApiBaseUrl();
-    if (savedUrl) {
+    if (savedUrl && !savedUrl.includes('localhost') && !savedUrl.includes('127.0.0.1')) {
       this.apiBaseUrl = savedUrl;
       return;
     }
 
-    // Use physical device IP if set, otherwise use default
     if (PHYSICAL_DEVICE_IP) {
       this.apiBaseUrl = PHYSICAL_DEVICE_IP;
       await storageService.saveApiBaseUrl(PHYSICAL_DEVICE_IP);
@@ -52,8 +66,11 @@ class EnvironmentConfig {
   }
 
   getApiBaseUrl(): string {
+    const webLan = getWebLanApiUrl();
+    if (webLan) {
+      return webLan;
+    }
     if (!this.apiBaseUrl) {
-      // Fallback if not initialized
       return PHYSICAL_DEVICE_IP || getDefaultApiUrl();
     }
     return this.apiBaseUrl;

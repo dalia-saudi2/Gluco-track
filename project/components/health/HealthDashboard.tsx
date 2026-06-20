@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Footprints, Moon, Flame } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
@@ -29,7 +29,9 @@ export function HealthDashboard() {
     isChecking,
     requestAccess,
     goToSettings,
-    checkStatus
+    checkStatus,
+    installHealthConnect,
+    needsHealthConnectInstall,
   } = useHealthPermissions();
 
   const {
@@ -41,7 +43,7 @@ export function HealthDashboard() {
     error,
     refreshData,
     isSimulated
-  } = useHealth(status);
+  } = useHealth(status, { patientId: user?.id, isAuthenticated: Boolean(user) });
 
   // Active Goals
   const STEPS_GOAL = 10000;
@@ -69,6 +71,8 @@ export function HealthDashboard() {
           onRequestAccess={requestAccess}
           onOpenSettings={goToSettings}
           onEnableSimulation={handleEnableSimulation}
+          onInstallHealthConnect={installHealthConnect}
+          needsHealthConnectInstall={needsHealthConnectInstall}
         />
       );
     }

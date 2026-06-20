@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Platform } from 'react-native';
 import { HealthPermissionStatus } from '../types/health.types';
 import { healthService } from '../services/health.service';
 
@@ -6,13 +7,18 @@ export function useHealthPermissions() {
   const [status, setStatus] = useState<HealthPermissionStatus>('idle');
   const [isChecking, setIsChecking] = useState(true);
   const [isRequesting, setIsRequesting] = useState(false);
+  const [needsHealthConnectInstall, setNeedsHealthConnectInstall] = useState(false);
 
   const checkStatus = useCallback(async () => {
     setIsChecking(true);
     try {
       const isAvailable = await healthService.isAvailable();
+      setNeedsHealthConnectInstall(
+        Platform.OS === 'android' && healthService.needsHealthConnectInstall()
+      );
+
       if (!isAvailable) {
-        setStatus('unavailable');
+        setStatus(healthService.needsHealthConnectInstall() ? 'unavailable' : 'unavailable');
         return 'unavailable';
       }
 
@@ -47,6 +53,10 @@ export function useHealthPermissions() {
     return await healthService.openSettings();
   }, []);
 
+  const installHealthConnect = useCallback(async () => {
+    return await healthService.openHealthConnectInstall();
+  }, []);
+
   useEffect(() => {
     checkStatus();
   }, [checkStatus]);
@@ -58,6 +68,9 @@ export function useHealthPermissions() {
     checkStatus,
     requestAccess,
     goToSettings,
+    installHealthConnect,
+    needsHealthConnectInstall,
     isSimulated: healthService.isSimulated(),
+    isNativeAndroid: healthService.isNativeAndroid(),
   };
 }

@@ -64,6 +64,51 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                raise ValueError("Email is required")
+            return normalized
+        return value
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def normalize_full_name(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("Full name is required")
+            if len(normalized) > 120:
+                raise ValueError("Full name must be at most 120 characters")
+            return normalized
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        if len(value) > 72:
+            raise ValueError("Password must be at most 72 characters")
+        return value
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def normalize_phone(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            if len(normalized) > 30:
+                raise ValueError("Phone number must be at most 30 characters")
+            return normalized
+        return value
+
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
@@ -232,6 +277,8 @@ class AppointmentBase(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     appointment_type: Optional[str] = None
+    visit_mode: Optional[str] = "in_person"
+    telehealth_platform: Optional[str] = None
 
 class AppointmentCreate(AppointmentBase):
     pass
@@ -244,11 +291,16 @@ class AppointmentUpdate(BaseModel):
     notes: Optional[str] = None
     status: Optional[AppointmentStatus] = None
     appointment_type: Optional[str] = None
+    visit_mode: Optional[str] = None
+    telehealth_platform: Optional[str] = None
 
 class Appointment(AppointmentBase):
     id: int
     patient_id: int
     status: AppointmentStatus
+    meeting_url: Optional[str] = None
+    meeting_provider: Optional[str] = None
+    meeting_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -641,6 +693,67 @@ class WaterIntakeTodayResponse(BaseModel):
     goal_reached: bool
     updated_at: Optional[str] = None
     last_logged_at: Optional[str] = None
+
+
+class HealthActivitySyncRecord(BaseModel):
+    activity_date: str
+    steps: int = 0
+    sleep_hours: float = 0
+    calories_burned: int = 0
+
+    @field_validator("steps", "calories_burned")
+    @classmethod
+    def non_negative_int(cls, v: int) -> int:
+        return max(0, v)
+
+    @field_validator("sleep_hours")
+    @classmethod
+    def non_negative_sleep(cls, v: float) -> float:
+        return max(0.0, v)
+
+
+class HealthActivitySyncRequest(BaseModel):
+    records: List[HealthActivitySyncRecord]
+    source: str = "health_connect"
+
+
+class HealthActivitySyncResponse(BaseModel):
+    synced_count: int
+    last_synced_at: Optional[str] = None
+
+
+class HealthActivityTodayResponse(BaseModel):
+    activity_date: str
+    steps: int
+    sleep_hours: float
+    calories_burned: int
+    source: Optional[str] = None
+    synced_at: Optional[str] = None
+
+
+class HealthMetricPoint(BaseModel):
+    date: str
+    value: float
+
+
+class HealthActivityHistoryResponse(BaseModel):
+    days: int
+    steps: List[HealthMetricPoint]
+    sleep: List[HealthMetricPoint]
+    calories: List[HealthMetricPoint]
+    last_synced_at: Optional[str] = None
+
+
+class HealthActivitySummaryResponse(BaseModel):
+    period: str
+    start_date: str
+    end_date: str
+    days_with_data: int
+    total_steps: int
+    avg_steps: int
+    avg_sleep_hours: float
+    total_calories: int
+    avg_calories: int
 
 
 class DoctorChatMessageOut(BaseModel):

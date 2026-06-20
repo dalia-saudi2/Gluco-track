@@ -6,8 +6,10 @@ import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_7
 import { DMSans_400Regular, DMSans_500Medium, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '../contexts/AuthContext';
+import { HydrationReminderProvider } from '../contexts/HydrationReminderContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { ToastProvider } from '../components/ToastProvider';
+import { ZoomOAuthHandler } from '../components/ZoomOAuthHandler';
 import { AuthGate, RootStack } from '../components/AuthGate';
 
 SplashScreen.preventAutoHideAsync();
@@ -42,12 +44,15 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ToastProvider>
-          <AuthGate>
-            <RootStack />
-          </AuthGate>
-          <ThemedStatusBar />
-        </ToastProvider>
+        <HydrationReminderProvider>
+          <ToastProvider>
+            <ZoomOAuthHandler />
+            <AuthGate>
+              <RootStack />
+            </AuthGate>
+            <ThemedStatusBar />
+          </ToastProvider>
+        </HydrationReminderProvider>
       </AuthProvider>
     </ThemeProvider>
   );

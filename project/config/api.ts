@@ -184,13 +184,14 @@ export class ApiClient {
   // Auth methods
   async login(email: string, password: string) {
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       const response = await fetch(`${this.baseUrl}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-          username: email,
+          username: normalizedEmail,
           password: password,
           grant_type: 'password'
         })
@@ -239,7 +240,12 @@ export class ApiClient {
   }) {
     return this.request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify(userData),
+      body: JSON.stringify({
+        ...userData,
+        email: userData.email.trim().toLowerCase(),
+        full_name: userData.full_name.trim(),
+        phone: userData.phone?.trim() || undefined,
+      }),
     });
   }
 
@@ -278,8 +284,41 @@ export class ApiClient {
     });
   }
 
+  async cancelAppointment(id: number) {
+    return this.request(`/appointments/${id}/cancel`, {
+      method: 'POST',
+    });
+  }
+
   async deleteAppointment(id: number) {
     return this.request(`/appointments/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async joinTelehealthMeeting(id: number) {
+    return this.request(`/appointments/${id}/telehealth/join`, {
+      method: 'POST',
+    });
+  }
+
+  // Zoom telemedicine (OAuth)
+  async getZoomOAuthStatus() {
+    return this.request('/zoom/oauth/status');
+  }
+
+  async getZoomAuthorizeUrl() {
+    return this.request('/zoom/oauth/authorize-url');
+  }
+
+  async callDoctorZoom() {
+    return this.request('/zoom/consultations/call-doctor', {
+      method: 'POST',
+    });
+  }
+
+  async disconnectZoomOAuth() {
+    return this.request('/zoom/oauth/disconnect', {
       method: 'DELETE',
     });
   }
@@ -472,7 +511,11 @@ export class ApiClient {
     const form = new FormData();
 
     if (typeof Blob !== 'undefined' && file instanceof Blob) {
-      form.append('file', file, 'lab-report');
+      const uploadName =
+        typeof File !== 'undefined' && file instanceof File && file.name
+          ? file.name
+          : 'lab-report.jpg';
+      form.append('file', file, uploadName);
     } else {
       const native = file as { uri: string; name: string; type: string };
       form.append('file', {
@@ -568,6 +611,43 @@ export class ApiClient {
     });
   }
 
+  async addWaterIntake(patientId: number, amountMl: number) {
+    return this.request(`/api/patients/${patientId}/water-intake/add`, {
+      method: 'POST',
+      body: JSON.stringify({ amount_ml: amountMl }),
+    });
+  }
+
+  async syncHealthActivity(
+    patientId: number,
+    body: {
+      records: Array<{
+        activity_date: string;
+        steps: number;
+        sleep_hours: number;
+        calories_burned: number;
+      }>;
+      source: string;
+    }
+  ) {
+    return this.request(`/api/patients/${patientId}/health-activity/sync`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getHealthActivityHistory(patientId: number, days: number) {
+    return this.request(`/api/patients/${patientId}/health-activity/history?days=${days}`);
+  }
+
+  async getHealthActivitySummary(patientId: number, period: 'day' | 'week' | 'month') {
+    return this.request(`/api/patients/${patientId}/health-activity/summary?period=${period}`);
+  }
+
+  async getHealthActivityToday(patientId: number) {
+    return this.request(`/api/patients/${patientId}/health-activity/today`);
+  }
+
   async getDoctorChats(patientId: number) {
     return this.request(`/api/patients/${patientId}/doctor-chats`);
   }
@@ -597,6 +677,21 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ content }),
     });
+  }
+
+  async getNearbyPlaces(params: {
+    category: 'pharmacy' | 'laboratory';
+    lat: number;
+    lng: number;
+    radiusM: number;
+  }) {
+    const qs = new URLSearchParams({
+      category: params.category,
+      lat: String(params.lat),
+      lng: String(params.lng),
+      radius_m: String(params.radiusM),
+    });
+    return this.request(`/places/nearby?${qs.toString()}`);
   }
 }
 

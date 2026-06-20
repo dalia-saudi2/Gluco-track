@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, G } from 'react-native-svg';
 import { LucideIcon } from 'lucide-react-native';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
@@ -66,19 +66,19 @@ export function HealthCard({
               fill="transparent"
             />
             {/* Progress Circle */}
-            <Circle
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              stroke={color}
-              strokeWidth={strokeWidth}
-              strokeDasharray={`${circumference} ${circumference}`}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-              fill="transparent"
-              rotation="-90"
-              origin={`${size / 2}, ${size / 2}`}
-            />
+            <G transform={`rotate(-90, ${size / 2}, ${size / 2})`}>
+              <Circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                stroke={color}
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${circumference} ${circumference}`}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                fill="transparent"
+              />
+            </G>
           </Svg>
           <View style={styles.percentTextContainer}>
             <Text style={[styles.percentText, { color }]}>{Math.round(percent)}%</Text>

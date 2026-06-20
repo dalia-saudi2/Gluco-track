@@ -107,6 +107,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
 
 
+    const onRecordsUpload = root === 'records-upload';
+
     if (needsOnboarding(user)) {
       const target = getOnboardingRoute(user, progress);
 
@@ -132,7 +134,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
 
 
-    if (onLogin || onRegister || onOnboarding || onIndex) {
+    if ((onLogin || onRegister || onOnboarding || onIndex) && !onRecordsUpload) {
 
       router.replace('/(tabs)');
 
@@ -197,6 +199,8 @@ export function RootStack() {
       <Stack.Screen name="register" />
 
       <Stack.Screen name="onboarding" />
+
+      <Stack.Screen name="records-upload" />
 
       <Stack.Screen name="(tabs)" />
 

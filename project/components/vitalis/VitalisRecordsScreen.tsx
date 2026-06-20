@@ -468,6 +468,10 @@ export function VitalisRecordsScreen({
           <FileText size={48} color={D.onSurfaceVariant} />
           <Text style={s.mutedText}>No reports available.</Text>
           <Text style={s.mutedSub}>Medical records will appear here once added to your account.</Text>
+          <Pressable style={s.primaryBtn} onPress={onUpload}>
+            <Upload size={16} color={D.onPrimary} />
+            <Text style={s.primaryBtnText}>Upload Reports</Text>
+          </Pressable>
         </View>
       );
     }
@@ -496,6 +500,7 @@ export function VitalisRecordsScreen({
     onDownloadReport,
     onShareReport,
     onRetry,
+    onUpload,
     router,
     D,
     s,
@@ -525,7 +530,7 @@ export function VitalisRecordsScreen({
           </View>
           <Pressable style={s.uploadBtn} onPress={onUpload}>
             <Upload size={16} color={D.onPrimary} />
-            <Text style={s.uploadBtnText}>Upload Lab Test</Text>
+            <Text style={s.uploadBtnText}>Upload Reports</Text>
           </Pressable>
         </View>
 

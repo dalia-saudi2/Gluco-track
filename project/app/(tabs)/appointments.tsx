@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { Alert, Linking } from 'react-native';
+import { Linking } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,6 +7,11 @@ import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { appointmentsService, Appointment } from '../../services/appointmentsService';
 import { VitalisAppointmentsScreen } from '../../components/vitalis/VitalisAppointmentsScreen';
 import { AppointmentBookingModal } from '../../components/appointments/AppointmentBookingModal';
+import { TelehealthPlatform, telehealthPlatformLabel } from '../../utils/telehealthMeeting';
+import { openExternalUrl } from '../../utils/openExternalUrl';
+import { callDoctor, getZoomAuthorizeUrl, getZoomOAuthStatus } from '../../services/zoomService';
+import { confirmAction, showAlert } from '../../utils/alert';
+import { showToast } from '../../components/ToastProvider';
 
 export default function AppointmentsScreen() {
   const { isAuthenticated, isLoading: authIsLoading, user } = useAuth();
@@ -19,6 +24,7 @@ export default function AppointmentsScreen() {
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
   const [visitMode, setVisitMode] = useState<'in_person' | 'telehealth'>('in_person');
+  const [telehealthPlatform, setTelehealthPlatform] = useState<TelehealthPlatform>('zoom');
   const [appointmentType, setAppointmentType] = useState<'routine' | 'follow_up' | 'urgent'>('routine');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTime, setSelectedTime] = useState('10:30 AM');
@@ -46,7 +52,7 @@ export default function AppointmentsScreen() {
 
   const mockAppointments: Appointment[] = [
     { id: 1, doctor: 'Dr. Mahmoud El-Sayed', specialty: 'Cardiologist', date: getFutureDate(3), time: '10:30 AM', location: '18 El-maadi Rd', status: 'Upcoming', mode: 'in_person', type: 'follow_up' },
-    { id: 2, doctor: 'Dr. Amira Mansour', specialty: 'Endocrinology', date: getFutureDate(10), time: '2:00 PM', location: 'Medical Center Downtown', status: 'Confirmed', mode: 'telehealth', type: 'routine' },
+    { id: 2, doctor: 'Dr. Amira Mansour', specialty: 'Endocrinology', date: getFutureDate(10), time: '2:00 PM', location: 'Telehealth (Zoom)', status: 'Confirmed', mode: 'telehealth', type: 'routine', telehealthPlatform: 'zoom' },
     { id: 3, doctor: 'Dr. Khaled Ibrahim', specialty: 'General Practitioner', date: getPastDate(5), time: '9:00 AM', location: 'City Hospital', status: 'Completed', mode: 'in_person', type: 'routine' },
     { id: 4, doctor: 'Dr. Lina Youssef', specialty: 'Pediatrics', date: getPastDate(15), time: '11:00 AM', location: 'West Clinic', status: 'Canceled', mode: 'in_person', type: 'routine' },
   ];
@@ -119,27 +125,25 @@ export default function AppointmentsScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
 
-    Alert.alert('Cancel Appointment', 'Are you sure you want to cancel this appointment?', [
-      { text: 'No', style: 'cancel' },
-      {
-        text: 'Yes, Cancel',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            if (isAuthenticated) {
-              try {
-                await appointmentsService.cancelAppointment(id);
-              } catch {}
-            }
-            setAppointments((prev) => prev.map((a) => (Number(a.id) === Number(id) ? { ...a, status: 'Canceled' as const } : a)));
-            setCurrentSubTab('canceled');
-            Alert.alert('Canceled', 'Your appointment has been canceled.');
-          } catch (err: any) {
-            Alert.alert('Error', err?.message || 'Failed to cancel.');
-          }
-        },
-      },
-    ]);
+    const confirmed = await confirmAction(
+      'Cancel Appointment',
+      'Are you sure you want to cancel this appointment?'
+    );
+    if (!confirmed) return;
+
+    try {
+      if (isAuthenticated) {
+        await appointmentsService.cancelAppointment(id);
+      }
+      setAppointments((prev) =>
+        prev.map((a) => (Number(a.id) === Number(id) ? { ...a, status: 'Canceled' as const } : a))
+      );
+      setCurrentSubTab('canceled');
+      showToast.success('Canceled', 'Your appointment has been canceled.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel.';
+      showToast.error('Error', msg);
+    }
   };
 
   const handleReschedule = (id: number) => {
@@ -149,6 +153,7 @@ export default function AppointmentsScreen() {
     setSelectedProvider(appt.doctor);
     setSelectedSpecialty(appt.specialty);
     setVisitMode(appt.mode === 'telehealth' ? 'telehealth' : 'in_person');
+    setTelehealthPlatform(appt.telehealthPlatform || 'zoom');
     setAppointmentType(appt.type === 'follow_up' || appt.type === 'routine' ? (appt.type as 'routine' | 'follow_up') : 'follow_up');
     setSelectedDate(appt.date);
     setSelectedTime(appt.time);
@@ -168,21 +173,92 @@ export default function AppointmentsScreen() {
       const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${formatTime(startIso)}/${formatTime(end.toISOString())}`;
       await Linking.openURL(url);
     } catch {
-      Alert.alert('Error', 'Unable to open calendar.');
+      showToast.error('Error', 'Unable to open calendar.');
     }
   };
 
-  const handleJoinTelehealth = async () => {
+  const handleJoinTelehealth = async (appt: Appointment) => {
+    if (!isAuthenticated) {
+      showToast.error('Sign in required', 'Please sign in to join your Zoom visit.');
+      return;
+    }
+
     try {
-      await Linking.openURL('https://example.telehealth/visit');
-    } catch {
-      Alert.alert('Error', 'Unable to join telehealth visit.');
+      if (appt.meetingUrl) {
+        await openExternalUrl(appt.meetingUrl);
+        return;
+      }
+
+      const zoomStatus = await getZoomOAuthStatus();
+      if (!zoomStatus.configured) {
+        showToast.error(
+          'Zoom not configured',
+          'Restart the backend after adding ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET to .env.'
+        );
+        return;
+      }
+
+      if (!zoomStatus.host_ready) {
+        const connectNow = await confirmAction(
+          'Connect Zoom first',
+          'Video visits need a one-time Zoom login. Open Zoom authorization now?'
+        );
+        if (connectNow) {
+          const { authorize_url } = await getZoomAuthorizeUrl();
+          await openExternalUrl(authorize_url);
+        }
+        return;
+      }
+
+      let meetingUrl: string | undefined;
+
+      try {
+        const join = await appointmentsService.joinTelehealthMeeting(appt.id);
+        meetingUrl = join.meeting_url;
+        setAppointments((prev) =>
+          prev.map((a) =>
+            a.id === appt.id
+              ? {
+                  ...a,
+                  meetingUrl: join.meeting_url,
+                  meetingProvider: join.meeting_provider,
+                  telehealthPlatform: 'zoom',
+                }
+              : a
+          )
+        );
+      } catch (joinErr) {
+        try {
+          const zoom = await callDoctor();
+          meetingUrl = zoom.join_url;
+        } catch {
+          throw joinErr;
+        }
+      }
+
+      if (!meetingUrl) {
+        showToast.error('No Zoom link', 'Reschedule this telehealth visit or use Call Doctor.');
+        return;
+      }
+
+      await openExternalUrl(meetingUrl);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to join Zoom visit.';
+      if (/connect zoom|zoom account/i.test(msg)) {
+        const connectNow = await confirmAction('Connect Zoom', `${msg}\n\nOpen Zoom login now?`);
+        if (connectNow) {
+          const { authorize_url } = await getZoomAuthorizeUrl();
+          await openExternalUrl(authorize_url);
+          return;
+        }
+      }
+      showToast.error('Join failed', msg);
     }
   };
 
   const sendNotifications = () => {
     const channels = [prefEmail && 'Email', prefSms && 'SMS', prefPush && 'App'].filter(Boolean);
-    if (channels.length) Alert.alert('Success', `Notifications sent via: ${channels.join(', ')}`);
+    if (channels.length) showToast.success('Success', `Notifications sent via: ${channels.join(', ')}`);
   };
 
   const handleProviderSelect = (name: string, specialty: string) => {
@@ -194,6 +270,14 @@ export default function AppointmentsScreen() {
   };
 
   const handleConfirmBooking = async () => {
+    if (visitMode === 'telehealth' && !isAuthenticated) {
+      showToast.error(
+        'Sign in required',
+        'Telehealth visits need a signed-in account and Zoom configured on the backend.'
+      );
+      return;
+    }
+
     setIsConfirming(true);
     try {
       const [time, period] = selectedTime.split(' ');
@@ -209,7 +293,8 @@ export default function AppointmentsScreen() {
         if (isAuthenticated) {
           await appointmentsService.updateAppointment(selectedAppointmentId, {
             appointment_date: isoDateTime,
-            location: visitMode === 'telehealth' ? 'Telehealth' : undefined,
+            visit_mode: visitMode,
+            telehealth_platform: visitMode === 'telehealth' ? telehealthPlatform : undefined,
             appointment_type: appointmentType,
             notes: reason,
           });
@@ -217,7 +302,16 @@ export default function AppointmentsScreen() {
         setAppointments((prev) =>
           prev.map((a) =>
             a.id === selectedAppointmentId
-              ? { ...a, date: selectedDate, time: selectedTime, status: 'Confirmed', mode: visitMode, type: appointmentType }
+              ? {
+                  ...a,
+                  date: selectedDate,
+                  time: selectedTime,
+                  status: 'Confirmed',
+                  mode: visitMode,
+                  type: appointmentType,
+                  telehealthPlatform: visitMode === 'telehealth' ? telehealthPlatform : undefined,
+                  location: visitMode === 'telehealth' ? `Telehealth (${telehealthPlatformLabel(telehealthPlatform)})` : a.location,
+                }
               : a
           )
         );
@@ -226,14 +320,27 @@ export default function AppointmentsScreen() {
           doctor_name: selectedProvider,
           appointment_date: isoDateTime,
           duration: 30,
-          location: visitMode === 'telehealth' ? 'Telehealth' : undefined,
+          visit_mode: visitMode,
+          telehealth_platform: visitMode === 'telehealth' ? telehealthPlatform : undefined,
           appointment_type: appointmentType,
           notes: reason,
         });
         setAppointments((prev) => [created, ...prev]);
         fetchAppointments();
+        if (visitMode === 'telehealth' && !created.meetingUrl) {
+          showToast.success(
+            'Appointment booked',
+            'Connect Zoom from Dashboard → Call Doctor before your video visit.'
+          );
+          setSelectedAppointmentId(null);
+          setBookingVisible(false);
+          setCurrentSubTab('upcoming');
+          sendNotifications();
+          return;
+        }
       } else {
         const newId = Math.max(0, ...appointments.map((a) => a.id)) + 1;
+        const isTelehealth = visitMode === 'telehealth';
         setAppointments((prev) => [
           {
             id: newId,
@@ -241,10 +348,11 @@ export default function AppointmentsScreen() {
             specialty: selectedSpecialty || 'General',
             date: selectedDate,
             time: selectedTime,
-            location: visitMode === 'telehealth' ? 'Telehealth' : 'To be provided',
+            location: isTelehealth ? `Telehealth (${telehealthPlatformLabel(telehealthPlatform)})` : 'To be provided',
             status: 'Upcoming',
             mode: visitMode,
             type: appointmentType,
+            telehealthPlatform: isTelehealth ? telehealthPlatform : undefined,
           },
           ...prev,
         ]);
@@ -253,14 +361,11 @@ export default function AppointmentsScreen() {
       setSelectedAppointmentId(null);
       setBookingVisible(false);
       setCurrentSubTab('upcoming');
-      Alert.alert('Appointment booked', 'Your appointment has been scheduled.', [
-        { text: 'Add to Calendar', onPress: () => handleAddToCalendar({ date: selectedDate, time: selectedTime, doctor: selectedProvider, isoDateTime }) },
-        { text: 'View Dashboard', onPress: () => router.push('/(tabs)') },
-        { text: 'OK', style: 'cancel' },
-      ]);
+      showToast.success('Appointment booked', 'Your appointment has been scheduled.');
       sendNotifications();
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to book appointment.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to book appointment.';
+      showToast.error('Error', msg);
     } finally {
       setIsConfirming(false);
     }
@@ -304,13 +409,17 @@ export default function AppointmentsScreen() {
           selectedProvider={selectedProvider}
           selectedSpecialty={selectedSpecialty}
           visitMode={visitMode}
+          telehealthPlatform={telehealthPlatform}
           selectedDate={selectedDate}
           selectedTime={selectedTime}
           reason={reason}
           availableTimes={availableTimes}
           isConfirming={isConfirming}
           onProviderSelect={handleProviderSelect}
-          onVisitModeChange={setVisitMode}
+          onVisitModeChange={(mode) => {
+            setVisitMode(mode);
+            if (mode === 'telehealth') setTelehealthPlatform('zoom');
+          }}
           onDateChange={setSelectedDate}
           onTimeChange={setSelectedTime}
           onReasonChange={setReason}

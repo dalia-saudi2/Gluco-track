@@ -4,6 +4,7 @@ from jose import JWTError, jwt
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
@@ -12,6 +13,10 @@ from config import settings
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+def normalize_email(email: str) -> str:
+    """Normalize email for lookup and storage."""
+    return email.strip().lower()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash."""
@@ -31,8 +36,11 @@ def get_password_hash(password: str) -> str:
 
 def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     """Authenticate a user with email and password."""
-    user = db.query(User).filter(User.email == email).first()
+    normalized = normalize_email(email)
+    user = db.query(User).filter(func.lower(User.email) == normalized).first()
     if not user or not user.hashed_password:
+        return None
+    if not user.is_active:
         return None
     if not verify_password(password, user.hashed_password):
         return None

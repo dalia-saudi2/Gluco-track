@@ -26,6 +26,11 @@ export interface BackendAppointment {
   notes?: string;
   appointment_type?: string;
   status: 'scheduled' | 'completed' | 'cancelled';
+  visit_mode?: 'in_person' | 'telehealth';
+  telehealth_platform?: 'zoom';
+  meeting_url?: string;
+  meeting_provider?: string;
+  meeting_id?: string;
   created_at: string;
   updated_at?: string;
 }

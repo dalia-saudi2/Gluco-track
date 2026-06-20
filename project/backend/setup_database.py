@@ -17,6 +17,7 @@ from pathlib import Path
 
 from config import settings
 from database import create_tables
+import models  # noqa: F401 — register ORM tables before create_all
 
 BACKEND_DIR = Path(__file__).parent
 
@@ -31,6 +32,9 @@ SQLITE_MIGRATIONS = [
     "migrate_flow_b.py",
     "migrate_feature_groups.py",
     "build_patient_features_db.py",
+    "migrate_add_telehealth_meeting.py",
+    "migrate_add_zoom_oauth.py",
+    "migrate_health_activity.py",
 ]
 
 

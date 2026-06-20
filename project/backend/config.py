@@ -62,20 +62,28 @@ class Settings(BaseSettings):
     # In production, set ALLOWED_ORIGINS environment variable (comma-separated)
     allowed_origins: List[str] = [
         "http://localhost:3000",
-        "http://localhost:8081", 
+        "http://localhost:8081",
         "http://localhost:8082",
-        "http://localhost:8083",  # React Native web port
-        "http://localhost:8084",  # React Native web port (alternative)
+        "http://localhost:8083",
+        "http://localhost:8084",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8081",
+        "http://127.0.0.1:8082",
+        "http://127.0.0.1:8083",
+        "http://127.0.0.1:8084",
+        "http://192.168.1.9:8084",
     ]
     
     @field_validator('allowed_origins', mode='before')
     @classmethod
     def parse_allowed_origins(cls, v):
+        if v is None:
+            return v
         if isinstance(v, str):
-            # Handle comma-separated string from .env file
-            if v:
-                return [origin.strip() for origin in v.split(",") if origin.strip()]
-            return []
+            # Empty env var should not wipe defaults
+            if not v.strip():
+                return v
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
     
     # File Upload
@@ -87,6 +95,23 @@ class Settings(BaseSettings):
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
     smtp_username: str = os.getenv("SMTP_USERNAME", "")
     smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+
+    # Zoom OAuth (User-managed app) — telemedicine
+    zoom_client_id: str = os.getenv("ZOOM_CLIENT_ID", "")
+    zoom_client_secret: str = os.getenv("ZOOM_CLIENT_SECRET", "")
+    zoom_redirect_uri: str = os.getenv("ZOOM_REDIRECT_URI", "http://localhost:8000/zoom/oauth/callback")
+    zoom_oauth_frontend_redirect: str = os.getenv(
+        "ZOOM_OAUTH_FRONTEND_REDIRECT", "http://localhost:8084"
+    )
+    zoom_host_user_id: str = os.getenv("ZOOM_HOST_USER_ID", "")
+
+    # Legacy Server-to-Server (optional fallback for scheduled appointments)
+    zoom_account_id: str = os.getenv("ZOOM_ACCOUNT_ID", "")
+    zoom_user_id: str = os.getenv("ZOOM_USER_ID", "me")
+
+    # Telehealth — Google Calendar + Meet (service account JSON path, calendar id)
+    google_service_account_file: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
+    google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
 settings = Settings()
 settings.database_url = resolve_database_url(settings.database_url)
