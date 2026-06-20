@@ -35,6 +35,13 @@ function formatApiErrorDetail(detail: unknown): string {
   }
 }
 
+function toQueryString(params: Record<string, any>): string {
+  return Object.entries(params)
+    .filter(([_, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&');
+}
+
 // API Configuration
 export const API_CONFIG = {
   BASE_URL: 'http://localhost:8000', // Default, will be overridden by environment config
@@ -190,11 +197,7 @@ export class ApiClient {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({
-          username: normalizedEmail,
-          password: password,
-          grant_type: 'password'
-        })
+        body: `username=${encodeURIComponent(normalizedEmail)}&password=${encodeURIComponent(password)}&grant_type=password`
       });
 
       if (!response.ok) {
@@ -476,8 +479,8 @@ export class ApiClient {
   }
 
   async searchUsdaFoods(query: string, pageSize = 20) {
-    const qs = new URLSearchParams({ q: query.trim(), page_size: String(pageSize) });
-    return this.request(`/nutrition/usda/search?${qs.toString()}`);
+    const qs = toQueryString({ q: query.trim(), page_size: String(pageSize) });
+    return this.request(`/nutrition/usda/search?${qs}`);
   }
 
   async getUsdaFoodDetail(fdcId: number) {
@@ -585,8 +588,8 @@ export class ApiClient {
   }
 
   async getGlucoseReadings(patientId: number, page = 1, limit = 30, order: 'asc' | 'desc' = 'desc') {
-    const qs = new URLSearchParams({ page: String(page), limit: String(limit), order });
-    return this.request(`/api/patients/${patientId}/glucose-readings?${qs.toString()}`);
+    const qs = toQueryString({ page: String(page), limit: String(limit), order });
+    return this.request(`/api/patients/${patientId}/glucose-readings?${qs}`);
   }
 
   async getGlucoseDashboard(patientId: number) {
@@ -602,13 +605,6 @@ export class ApiClient {
 
   async getWaterIntakeToday(patientId: number) {
     return this.request(`/api/patients/${patientId}/water-intake/today`);
-  }
-
-  async addWaterIntake(patientId: number, amountMl: number) {
-    return this.request(`/api/patients/${patientId}/water-intake/add`, {
-      method: 'POST',
-      body: JSON.stringify({ amount_ml: amountMl }),
-    });
   }
 
   async addWaterIntake(patientId: number, amountMl: number) {
@@ -664,8 +660,8 @@ export class ApiClient {
   }
 
   async getDoctorPortalChats(doctorName: string) {
-    const qs = new URLSearchParams({ doctor_name: doctorName });
-    return this.request(`/api/doctor/chats?${qs.toString()}`);
+    const qs = toQueryString({ doctor_name: doctorName });
+    return this.request(`/api/doctor/chats?${qs}`);
   }
 
   async getDoctorPortalChat(chatId: number) {
@@ -685,13 +681,13 @@ export class ApiClient {
     lng: number;
     radiusM: number;
   }) {
-    const qs = new URLSearchParams({
+    const qs = toQueryString({
       category: params.category,
       lat: String(params.lat),
       lng: String(params.lng),
       radius_m: String(params.radiusM),
     });
-    return this.request(`/places/nearby?${qs.toString()}`);
+    return this.request(`/places/nearby?${qs}`);
   }
 }
 

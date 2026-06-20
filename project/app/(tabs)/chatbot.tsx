@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import {
   Send,
   Bot,
@@ -25,7 +26,7 @@ import {
   Sparkles,
   Stethoscope,
 } from 'lucide-react-native';
-import { groqChat, groqSuggestions } from '../../config/llm';
+import { groqChat, groqSuggestions, MEDICAL_DISCLAIMER, ChatMessage } from '../../config/llm';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
 import { chatbotService } from '../../services/chatbotService';
@@ -146,6 +147,7 @@ export default function ChatbotScreen() {
   const D = useD();
   const styles = useDashboardStyles(createChatStyles);
   const scrollViewRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
   const [isInitializing, setIsInitializing] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([
@@ -196,74 +198,158 @@ export default function ChatbotScreen() {
     scrollViewRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
+  // Helper to simulate word-by-word typewriter effect
+  const simulateTyping = (
+    text: string,
+    messageId: string,
+    onDone: (finalText: string) => void
+  ) => {
+    const words = text.split(/(\s+)/); // Keep spacing intact
+    let currentWordIndex = 0;
+    let accumulated = '';
+
+    // Ensure initial message object is in the list
+    setMessages(prev => {
+      if (!prev.some(m => m.id === messageId)) {
+        return [
+          ...prev,
+          {
+            id: messageId,
+            text: '',
+            isUser: false,
+            timestamp: new Date(),
+            type: 'text'
+          }
+        ];
+      }
+      return prev;
+    });
+
+    const interval = setInterval(() => {
+      if (currentWordIndex >= words.length) {
+        clearInterval(interval);
+        onDone(text);
+        return;
+      }
+
+      accumulated += words[currentWordIndex];
+      currentWordIndex++;
+
+      setMessages(prev => {
+        const index = prev.findIndex(m => m.id === messageId);
+        if (index === -1) return prev;
+        const updated = [...prev];
+        updated[index] = {
+          ...updated[index],
+          text: accumulated
+        };
+        return updated;
+      });
+    }, 20); // 20ms typewriter updates
+  };
+
   // 3. Message Handling Logic
-  // This function coordindates sending text to the primary AI (Backend)
+  // This function coordinates sending text to the primary AI (Backend)
   // or falling back to a local LLM if the server is unreachable.
-  const handleSendMessage = async () => {
-    if (!inputText.trim()) return;
+  const handleSendMessage = async (overrideText?: string) => {
+    // Guard: overrideText must be a string (onPress can pass event objects)
+    const textToSend = (typeof overrideText === 'string' ? overrideText : inputText).trim();
+    if (!textToSend) return;
+
+    // Clear input immediately and imperatively — fixes React Native multiline retention bug
+    setInputText('');
+    inputRef.current?.clear();
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: inputText.trim(),
+      text: textToSend,
       isUser: true,
       timestamp: new Date(),
       type: 'text'
     };
 
+    // Add user message to state, show typing indicator initially
     setMessages(prev => [...prev, userMessage]);
-    const currentInput = inputText.trim();
-    setInputText('');
     setIsTyping(true);
     setShowQuickActions(false);
 
+    // Save to backend in background (don't block on it, don't use its response)
+    if (isAuthenticated) {
+      chatbotService.sendMessage(textToSend).catch((e: unknown) => {
+        console.warn('[Chat] Backend save failed (non-critical):', e);
+      });
+    }
+
+    // Convert current messages state (plus the new user message) to LLM format to preserve full context history
+    const historyForLLM: ChatMessage[] = messages
+      .filter(m => m.type !== 'error' && !m.isError)
+      .map(m => ({
+        role: m.isUser ? ('user' as const) : ('assistant' as const),
+        content: m.text
+      }));
+    
+    historyForLLM.push({
+      role: 'user',
+      content: textToSend
+    });
+
+    const botMessageId = (Date.now() + 1).toString();
+
     try {
-      let botResponse: string;
-      let suggestions: string[] = [];
+      // Call the non-streaming LLM endpoint directly
+      const fullResponse = await groqChat(historyForLLM);
+      setIsTyping(false); // Stop typing indicator once response is back
 
-      // Try backend first if authenticated
-      if (isAuthenticated) {
+      // Animate the text in-place word-by-word
+      simulateTyping(fullResponse, botMessageId, async (finalText) => {
+        let suggestions: string[] = [];
         try {
-          const backendResponse = await chatbotService.sendMessage(currentInput);
-          botResponse = backendResponse.text;
-          suggestions = backendResponse.suggestions || [];
-        } catch (backendError) {
-          console.warn('Backend chat failed, falling back to local LLM:', backendError);
-          // Fallback to local LLM
-          botResponse = await groqChat([{ role: 'user', content: currentInput }]);
-          suggestions = await groqSuggestions(currentInput);
+          suggestions = await groqSuggestions(textToSend);
+        } catch (e) {
+          console.warn('[Chat] Suggestions call failed:', e);
         }
-      } else {
-        // DISCUSSION: "HYBRID AI STRATEGY"
-        // 1. Primary: Backend AI (Personalized, has database context)
-        // 2. Secondary: Groq/Local LLM (Fast, fallback if server is down)
-        // 3. Last Resort: Hardcoded Rules (Deterministic, always works)
-        botResponse = await groqChat([{ role: 'user', content: currentInput }]);
-        suggestions = await groqSuggestions(currentInput);
-      }
 
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: botResponse,
-        isUser: false,
-        timestamp: new Date(),
-        type: 'text',
-        suggestions: suggestions.length > 0 ? suggestions : undefined
-      };
+        setMessages(prev => {
+          const index = prev.findIndex(m => m.id === botMessageId);
+          if (index === -1) {
+            return [
+              ...prev,
+              {
+                id: botMessageId,
+                text: finalText,
+                isUser: false,
+                timestamp: new Date(),
+                type: 'text',
+                suggestions: suggestions.length > 0 ? suggestions : undefined
+              }
+            ];
+          }
+          const updated = [...prev];
+          updated[index] = {
+            ...updated[index],
+            text: finalText,
+            suggestions: suggestions.length > 0 ? suggestions : undefined
+          };
+          return updated;
+        });
+      });
 
-      setMessages(prev => [...prev, botMessage]);
       setChatbotState(prev => ({
         ...prev,
         lastResponse: new Date(),
         isConnected: true,
         errorCount: 0
       }));
-    } catch (error) {
-      console.error('Error getting AI response:', error);
+    } catch (err) {
+      console.error('[Chat] groqChat generation failed:', err);
+      setIsTyping(false);
 
-      // Use fallback response
-      const fallbackResponse = getFallbackResponse(currentInput);
+      // Remove the partially generated bot message if it was created
+      setMessages(prev => prev.filter(m => m.id !== botMessageId));
+
+      const fallbackResponse = getFallbackResponse(textToSend);
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: (Date.now() + 2).toString(),
         text: fallbackResponse,
         isUser: false,
         timestamp: new Date(),
@@ -278,68 +364,36 @@ export default function ChatbotScreen() {
         isConnected: false,
         errorCount: prev.errorCount + 1
       }));
-    } finally {
-      setIsTyping(false);
     }
   };
 
-  // Handle suggestion selection
+  // Handle suggestion selection — passes text directly to avoid stale closure bug
   const handleSuggestion = (suggestion: string) => {
-    setInputText(suggestion);
-    // UI/UX DISCUSSION: Immediate feedback.
-    // Instead of making the user click 'Send' after clicking a suggestion,
-    // we trigger the send logic automatically to reduce friction (tap-to-send).
-    setTimeout(() => {
-      handleSendMessage();
-    }, 100);
+    handleSendMessage(suggestion);
   };
 
   // Handle retry for failed messages
   const handleRetry = async (messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message || !message.isUser) return;
+    // Find the error message index
+    const errorIndex = messages.findIndex(m => m.id === messageId);
+    if (errorIndex === -1) return;
 
-    setIsTyping(true);
-    try {
-      let botResponse: string;
-      let suggestions: string[] = [];
-
-      // Try backend first if authenticated
-      if (isAuthenticated) {
-        try {
-          const backendResponse = await chatbotService.sendMessage(message.text);
-          botResponse = backendResponse.text;
-          suggestions = backendResponse.suggestions || [];
-        } catch (backendError) {
-          console.warn('Backend retry failed, using local LLM:', backendError);
-          botResponse = await groqChat([{ role: 'user', content: message.text }]);
-          suggestions = await groqSuggestions(message.text);
-        }
-      } else {
-        botResponse = await groqChat([{ role: 'user', content: message.text }]);
-        suggestions = await groqSuggestions(message.text);
+    // Find the last user message before this error message
+    let lastUserMessage: Message | undefined;
+    for (let i = errorIndex - 1; i >= 0; i--) {
+      if (messages[i].isUser) {
+        lastUserMessage = messages[i];
+        break;
       }
-
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: botResponse,
-        isUser: false,
-        timestamp: new Date(),
-        type: 'text',
-        suggestions: suggestions.length > 0 ? suggestions : undefined
-      };
-
-      setMessages(prev => [...prev, botMessage]);
-      setChatbotState(prev => ({
-        ...prev,
-        isConnected: true,
-        errorCount: 0
-      }));
-    } catch (error) {
-      console.error('Retry failed:', error);
-    } finally {
-      setIsTyping(false);
     }
+
+    if (!lastUserMessage) return;
+
+    // Remove the error message from the messages array
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+
+    // Now call handleSendMessage with the text of the last user message
+    await handleSendMessage(lastUserMessage.text);
   };
 
   // Handle quick action selection
@@ -434,15 +488,19 @@ export default function ChatbotScreen() {
           </TouchableOpacity>
         )}
       </View>
-      <Text
-        style={[
-          styles.messageText,
-          message.isUser ? styles.userMessageText : styles.botMessageText,
-          message.isError && styles.errorMessageText,
-        ]}
-      >
-        {message.text}
-      </Text>
+
+      {message.isUser ? (
+        // User messages: plain text (they type plain text)
+        <Text style={[styles.messageText, styles.userMessageText]}>
+          {message.text}
+        </Text>
+      ) : (
+        // Bot messages: render as markdown so bold/lists/headers display correctly
+        <Markdown style={buildMarkdownStyles(D, message.isError ?? false)}>
+          {message.text}
+        </Markdown>
+      )}
+
       {message.suggestions && message.suggestions.length > 0 && (
         <View style={styles.suggestionsContainer}>
           <Text style={styles.suggestionsTitle}>Suggestions</Text>
@@ -455,6 +513,14 @@ export default function ChatbotScreen() {
               <Text style={styles.suggestionText}>{suggestion}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+      {!message.isUser && !message.isError && (
+        <View style={styles.msgDisclaimer}>
+          <AlertCircle size={10} color={'#d97706'} />
+          <Text style={styles.msgDisclaimerText}>
+            Not a real doctor. Always consult a qualified healthcare provider.
+          </Text>
         </View>
       )}
     </View>
@@ -492,7 +558,7 @@ export default function ChatbotScreen() {
             </View>
             <View>
               <Text style={styles.pageTitle}>AI Assistant</Text>
-              <Text style={styles.pageSub}>Diabetes care guidance · powered by AI</Text>
+              <Text style={styles.pageSub}>Diabetes care guidance · DeepSeek AI</Text>
             </View>
           </View>
           {authIsLoading || isInitializing ? (
@@ -547,6 +613,7 @@ export default function ChatbotScreen() {
 
             <View style={styles.inputContainer}>
               <TextInput
+                ref={inputRef}
                 style={styles.textInput}
                 value={inputText}
                 onChangeText={setInputText}
@@ -557,7 +624,7 @@ export default function ChatbotScreen() {
               />
               <Pressable
                 style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-                onPress={handleSendMessage}
+                onPress={() => handleSendMessage()}
                 disabled={!inputText.trim() || isTyping}
               >
                 <Send size={18} color={inputText.trim() ? D.onPrimary : D.onSurfaceVariant} />
@@ -567,9 +634,9 @@ export default function ChatbotScreen() {
         </CandyCard>
 
         <View style={styles.disclaimer}>
-          <Stethoscope size={12} color={D.onSurfaceVariant} />
+          <Stethoscope size={12} color={'#d97706'} />
           <Text style={styles.disclaimerText}>
-            Not a substitute for professional medical advice. For emergencies, call 911.
+            ⚠️ AI responses are for informational purposes only and are NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult a licensed healthcare provider. In emergencies, call 911.
           </Text>
         </View>
       </View>
@@ -652,27 +719,27 @@ function createChatStyles(D: DashboardPalette) {
   messagesContent: { padding: 14, paddingBottom: 8 },
   messageBubble: { maxWidth: '85%', marginBottom: 10, padding: 12, borderRadius: 18 },
   userMessage: {
-    alignSelf: 'flex-end',
+    alignSelf: 'flex-end' as const,
     backgroundColor: D.primary,
     borderBottomRightRadius: 4,
   },
   botMessage: {
-    alignSelf: 'flex-start',
+    alignSelf: 'flex-start' as const,
     backgroundColor: D.surfaceContainerLow,
     borderBottomLeftRadius: 4,
     borderWidth: 1,
     borderColor: D.borderSubtle,
   },
   errorMessage: { borderColor: 'rgba(229,62,62,0.35)', backgroundColor: '#fef2f2' },
-  messageHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  messageHeader: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginBottom: 4 },
   messageTime: { fontFamily: DF.medium, fontSize: 9, color: D.onSurfaceVariant },
   messageText: { fontFamily: DF.medium, fontSize: 14, lineHeight: 20 },
   userMessageText: { color: D.onPrimary },
   botMessageText: { color: D.onSurface },
   errorMessageText: { color: D.error },
-  retryButton: { marginLeft: 'auto', padding: 4, borderRadius: 999, backgroundColor: '#fee2e2' },
+  retryButton: { marginLeft: 'auto' as any, padding: 4, borderRadius: 999, backgroundColor: '#fee2e2' },
   suggestionsContainer: { marginTop: 8, gap: 6 },
-  suggestionsTitle: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant, textTransform: 'uppercase' },
+  suggestionsTitle: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant, textTransform: 'uppercase' as const },
   suggestionButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -682,11 +749,11 @@ function createChatStyles(D: DashboardPalette) {
     borderColor: D.accentBorder.primary,
   },
   suggestionText: { fontFamily: DF.medium, fontSize: 12, color: D.primary },
-  typingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  typingText: { fontFamily: DF.medium, fontSize: 12, color: D.onSurfaceVariant, fontStyle: 'italic' },
+  typingIndicator: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8 },
+  typingText: { fontFamily: DF.medium, fontSize: 12, color: D.onSurfaceVariant, fontStyle: 'italic' as const },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: 'row' as const,
+    alignItems: 'flex-end' as const,
     gap: 10,
     padding: 12,
     borderTopWidth: 1,
@@ -711,11 +778,123 @@ function createChatStyles(D: DashboardPalette) {
     height: 42,
     borderRadius: 21,
     backgroundColor: D.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
   },
   sendButtonDisabled: { backgroundColor: D.surfaceContainerHigh },
-  disclaimer: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, paddingBottom: 4 },
-  disclaimerText: { flex: 1, fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, lineHeight: 14 },
+  disclaimer: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: 6, paddingHorizontal: 4, paddingBottom: 4, backgroundColor: '#fffbeb', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: '#fde68a' },
+  disclaimerText: { flex: 1, fontFamily: DF.medium, fontSize: 10, color: '#92400e', lineHeight: 14 },
+  msgDisclaimer: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: 'rgba(217,119,6,0.2)' },
+  msgDisclaimerText: { flex: 1, fontFamily: DF.medium, fontSize: 9, color: '#d97706', lineHeight: 12, fontStyle: 'italic' as const },
+  };
+}
+
+// Markdown styles for bot messages — matches the design system
+function buildMarkdownStyles(D: DashboardPalette, isError: boolean) {
+  const textColor = isError ? D.error : D.onSurface;
+  return {
+    body: {
+      color: textColor,
+      fontFamily: DF.medium,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    paragraph: {
+      color: textColor,
+      fontFamily: DF.medium,
+      fontSize: 14,
+      lineHeight: 20,
+      marginTop: 0,
+      marginBottom: 6,
+    },
+    strong: {
+      fontFamily: DF.bold,
+      color: textColor,
+    },
+    em: {
+      fontStyle: 'italic' as const,
+      color: textColor,
+    },
+    heading1: {
+      fontFamily: DF.bold,
+      fontSize: 17,
+      color: textColor,
+      marginBottom: 6,
+      marginTop: 4,
+    },
+    heading2: {
+      fontFamily: DF.bold,
+      fontSize: 15,
+      color: textColor,
+      marginBottom: 4,
+      marginTop: 4,
+    },
+    heading3: {
+      fontFamily: DF.bold,
+      fontSize: 14,
+      color: textColor,
+      marginBottom: 4,
+      marginTop: 4,
+    },
+    bullet_list: {
+      marginTop: 2,
+      marginBottom: 4,
+    },
+    ordered_list: {
+      marginTop: 2,
+      marginBottom: 4,
+    },
+    list_item: {
+      color: textColor,
+      fontFamily: DF.medium,
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 2,
+    },
+    bullet_list_icon: {
+      color: D.primary,
+      marginTop: 4,
+    },
+    ordered_list_icon: {
+      color: D.primary,
+      fontFamily: DF.bold,
+      fontSize: 13,
+    },
+    code_inline: {
+      backgroundColor: D.surfaceContainerHigh,
+      color: D.secondary,
+      fontFamily: 'monospace',
+      fontSize: 12,
+      paddingHorizontal: 4,
+      borderRadius: 4,
+    },
+    fence: {
+      backgroundColor: D.surfaceContainerHigh,
+      padding: 10,
+      borderRadius: 8,
+      marginVertical: 6,
+    },
+    code_block: {
+      backgroundColor: D.surfaceContainerHigh,
+      color: D.onSurface,
+      fontFamily: 'monospace',
+      fontSize: 12,
+      padding: 10,
+      borderRadius: 8,
+    },
+    blockquote: {
+      backgroundColor: D.surfaceContainer,
+      borderLeftWidth: 3,
+      borderLeftColor: D.primary,
+      paddingLeft: 10,
+      paddingVertical: 4,
+      marginVertical: 4,
+      borderRadius: 4,
+    },
+    hr: {
+      backgroundColor: D.borderSubtle,
+      height: 1,
+      marginVertical: 8,
+    },
   };
 }

@@ -6,8 +6,13 @@ import { storageService } from '../services/storageService';
 // On Android emulator: use 10.0.2.2 instead of localhost
 // On iOS simulator: use localhost
 // On physical device: use your computer's IP address
+const getDynamicHostIp = (): string | null => {
+  const debuggerHost = Constants.expoConfig?.hostUri || '';
+  const ip = debuggerHost.split(':')[0];
+  return ip ? `http://${ip}:8000` : null;
+};
 
-const PHYSICAL_DEVICE_IP = 'http://192.168.1.9:8000'; // Your PC's LAN IP — phone must be on same Wi‑Fi
+const PHYSICAL_DEVICE_IP = getDynamicHostIp() || '';
 
 /** When opened on phone browser at http://192.168.x.x:8084, API must use same host, not localhost. */
 function getWebLanApiUrl(): string | null {
@@ -28,7 +33,7 @@ const getDefaultApiUrl = () => {
   }
 
   const isDev = __DEV__;
-  
+
   if (Platform.OS === 'android') {
     return isDev ? 'http://10.0.2.2:8000' : 'https://api.yourdomain.com';
   }
@@ -50,7 +55,12 @@ class EnvironmentConfig {
     }
 
     const savedUrl = await storageService.getApiBaseUrl();
-    if (savedUrl && !savedUrl.includes('localhost') && !savedUrl.includes('127.0.0.1')) {
+    if (
+      savedUrl &&
+      !savedUrl.includes('localhost') &&
+      !savedUrl.includes('127.0.0.1') &&
+      savedUrl === PHYSICAL_DEVICE_IP
+    ) {
       this.apiBaseUrl = savedUrl;
       return;
     }
@@ -94,4 +104,3 @@ export const environmentConfig = new EnvironmentConfig();
 
 // Initialize on import
 environmentConfig.initialize();
-

@@ -1,7 +1,7 @@
 """Validation helpers for onboarding demographics."""
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Union
 
 MIN_PATIENT_AGE = 20
 MAX_PATIENT_AGE = 79
@@ -147,11 +147,11 @@ LOW_EDUCATION_MAJORS = frozenset({
 })
 
 
-def _as_date(value: datetime | date) -> date:
+def _as_date(value: Union[datetime, date]) -> date:
     return value.date() if isinstance(value, datetime) else value
 
 
-def calculate_age(dob: datetime | date) -> int:
+def calculate_age(dob: Union[datetime, date]) -> int:
     dob_date = _as_date(dob)
     today = date.today()
     age = today.year - dob_date.year
@@ -160,7 +160,7 @@ def calculate_age(dob: datetime | date) -> int:
     return age
 
 
-def coerce_date_of_birth(value: Optional[datetime | date | str]) -> Optional[datetime]:
+def coerce_date_of_birth(value: Optional[Union[datetime, date, str]]) -> Optional[datetime]:
     """Accept YYYY-MM-DD or ISO datetime strings from the mobile app."""
     if value is None:
         return None
@@ -184,7 +184,7 @@ def coerce_date_of_birth(value: Optional[datetime | date | str]) -> Optional[dat
     return parsed
 
 
-def validate_date_of_birth(dob: Optional[datetime | date]) -> None:
+def validate_date_of_birth(dob: Optional[Union[datetime, date]]) -> None:
     if dob is None:
         return
 

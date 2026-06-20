@@ -1,3 +1,4 @@
+import '../polyfills'; // Must be first — patches Hermes globals before any SDK loads
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { ThemedStatusBar } from '../components/ThemedStatusBar';

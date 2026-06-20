@@ -43,8 +43,14 @@ def migrate():
         existing = {row[1] for row in cursor.fetchall()}
         for name, col_type in columns:
             if name not in existing:
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
-                print(f"Added {table}.{name}")
+                try:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
+                    print(f"Added {table}.{name}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
+                        print(f"Column {table}.{name} already exists (skipped)")
+                    else:
+                        raise
 
     add_columns("users", USER_COLUMNS)
     add_columns("patient_measurements", MEASUREMENT_COLUMNS)

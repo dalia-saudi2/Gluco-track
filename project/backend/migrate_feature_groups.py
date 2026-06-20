@@ -76,8 +76,14 @@ def add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple[str, str
     existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()}
     for name, col_type in columns:
         if name not in existing:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
-            print(f"  + {table}.{name}")
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
+                print(f"  + {table}.{name}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
+                    print(f"  • {table}.{name} already exists (skipped)")
+                else:
+                    raise
 
 
 def migrate() -> None:
