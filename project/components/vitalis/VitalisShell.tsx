@@ -19,6 +19,7 @@ import { MobileMenuButton } from './MobileMenuButton';
 import { createSidebarStyles } from './MobileNavDrawer';
 import { ThemeToggleButton } from './ThemeToggleButton';
 import { RemindersBellButton } from '../dashboard/RemindersBellButton';
+import { blurActiveElement } from '../../utils/blurActiveElement';
 
 const SIDEBAR_BREAKPOINT = 1024;
 
@@ -71,7 +72,10 @@ export function VitalisShell({
                 {VITALIS_NAV.map((item) => (
                   <Pressable
                     key={item.id}
-                    onPress={() => router.push(item.route as never)}
+                    onPress={() => {
+                      blurActiveElement();
+                      router.push(item.route as never);
+                    }}
                     style={[sidebarStyles.navItem, item.id === activeNavId && sidebarStyles.navItemActive]}
                   >
                     <item.icon size={16} color={item.id === activeNavId ? D.onPrimary : D.onSurfaceVariant} />
@@ -113,7 +117,13 @@ export function VitalisShell({
                 {headerExtra}
                 <ThemeToggleButton />
                 <RemindersBellButton iconBtnStyle={styles.iconBtn} />
-                <Pressable style={styles.iconBtn} onPress={() => router.push('/(tabs)/profile' as never)}>
+                <Pressable
+                  style={styles.iconBtn}
+                  onPress={() => {
+                    blurActiveElement();
+                    router.push('/(tabs)/profile' as never);
+                  }}
+                >
                   <Settings size={20} color={D.onSurfaceVariant} />
                 </Pressable>
                 <View style={styles.userChip}>

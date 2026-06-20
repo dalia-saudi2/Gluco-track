@@ -17,6 +17,8 @@ import { apiClient } from '../../config/api';
 import { showToast } from '../../components/ToastProvider';
 import { LabOnboardingColors as C } from '../../constants/LabOnboardingColors';
 import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
+import { exitLabUploadFlow, peekLabUploadReturnTo } from '../../utils/labUploadReturn';
 import { authService } from '../../services/authService';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
@@ -45,8 +47,22 @@ export default function LabUploadScreen() {
   const handleUploadSuccess = async () => {
     showToast.success('Upload complete', 'Review extracted values next.');
     await refreshUser();
-    const user = await authService.getCurrentUser();
-    router.replace(await resolveOnboardingRoute(user));
+    const currentUser = await authService.getCurrentUser();
+
+    if (currentUser?.onboarding_completed || peekLabUploadReturnTo()) {
+      replaceOnboardingStep(router, '/onboarding/lab-review');
+      return;
+    }
+
+    const next = await resolveOnboardingRoute(currentUser);
+    replaceOnboardingStep(router, next);
+  };
+
+  const hasReturnRoute = Boolean(peekLabUploadReturnTo());
+
+  const handleBack = () => {
+    if (exitLabUploadFlow(router)) return;
+    goBack();
   };
 
   const runUpload = async (runner: () => Promise<void>) => {
@@ -108,8 +124,8 @@ export default function LabUploadScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        {canGoBack ? (
-          <Pressable style={styles.headerBtn} onPress={goBack}>
+        {canGoBack || hasReturnRoute ? (
+          <Pressable style={styles.headerBtn} onPress={handleBack}>
             <ArrowLeft size={22} color={C.primary} />
           </Pressable>
         ) : (

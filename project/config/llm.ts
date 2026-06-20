@@ -7,7 +7,9 @@ if (typeof globalThis.structuredClone === 'undefined') {
 }
 
 // Static imports — Metro/Expo bundler does NOT support dynamic import() reliably
+import { Platform } from 'react-native';
 import { API_KEYS } from './api-keys';
+import { apiClient } from './api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,59 +99,77 @@ function getFallbackResponse(userText: string): string {
 // Main chat function
 // ---------------------------------------------------------------------------
 
+async function callAiGatewayDirect(messages: ChatMessage[], apiKey: string): Promise<string> {
+  const mappedMessages = messages.map(m => ({
+    role: m.role,
+    content: [{ type: 'text' as const, text: m.content }]
+  }));
+
+  const response = await fetch('https://ai-gateway.vercel.sh/v3/ai/language-model', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'ai-gateway-protocol-version': '0.0.1',
+      'x-ai-gateway-auth-method': 'api-key',
+      'ai-language-model-specification-version': '3',
+      'ai-model-id': 'deepseek/deepseek-v3.2',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      system: HEALTHCARE_SYSTEM_PROMPT,
+      prompt: mappedMessages,
+      temperature: 0.7,
+      maxTokens: 1200,
+      providerOptions: {
+        deepseek: {
+          reasoning: false,
+          thinking: false,
+          maxOutputTokens: 1200
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const textPart = data.content?.find((part: any) => part.type === 'text');
+  const text = textPart?.text?.trim();
+  if (text) return text;
+
+  throw new Error('AI Gateway returned no text content.');
+}
+
+async function callAiGatewayViaBackend(messages: ChatMessage[]): Promise<string> {
+  const result = await apiClient.chatLlm(messages);
+  const text = result.text?.trim();
+  if (text) return text;
+  throw new Error('Backend LLM proxy returned no text.');
+}
+
 export async function groqChat(messages: ChatMessage[]): Promise<string> {
   const apiKey = API_KEYS.AI_GATEWAY_API_KEY;
 
-  console.log('[LLM] groqChat called. Key present:', !!apiKey, '| Key starts:', apiKey ? apiKey.slice(0, 8) : 'NONE');
+  console.log('[LLM] groqChat called. Key present:', !!apiKey, '| Platform:', Platform.OS);
 
-  if (apiKey) {
+  if (Platform.OS === 'web') {
     try {
-      console.log('[LLM] Calling DeepSeek v3.2 via AI Gateway REST API...');
-
-      const mappedMessages = messages.map(m => ({
-        role: m.role,
-        content: [{ type: 'text' as const, text: m.content }]
-      }));
-
-      const response = await fetch('https://ai-gateway.vercel.sh/v3/ai/language-model', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'ai-gateway-protocol-version': '0.0.1',
-          'x-ai-gateway-auth-method': 'api-key',
-          'ai-language-model-specification-version': '3',
-          'ai-model-id': 'deepseek/deepseek-v3.2',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          system: HEALTHCARE_SYSTEM_PROMPT,
-          prompt: mappedMessages,
-          temperature: 0.7,
-          maxTokens: 1200,
-          providerOptions: {
-            deepseek: {
-              reasoning: false,
-              thinking: false,
-              maxOutputTokens: 1200
-            }
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log('[LLM] Raw response data:', JSON.stringify(data));
-      const textPart = data.content?.find((part: any) => part.type === 'text');
-      const text = textPart?.text?.trim();
-
-      console.log('[LLM] Response received, length:', text?.length);
-      if (text) return text;
-
-      return "I apologize — I couldn't generate a response right now. Please try again.";
+      console.log('[LLM] Web: calling AI Gateway via backend proxy...');
+      const text = await callAiGatewayViaBackend(messages);
+      console.log('[LLM] Backend proxy response length:', text.length);
+      return text;
+    } catch (error: any) {
+      console.error('[LLM] Backend proxy FAILED:', error?.message || error);
+    }
+  } else if (apiKey) {
+    try {
+      console.log('[LLM] Native: calling AI Gateway REST API directly...');
+      const text = await callAiGatewayDirect(messages, apiKey);
+      console.log('[LLM] Response received, length:', text.length);
+      return text;
     } catch (error: any) {
       console.error('[LLM] REST call FAILED:', error?.message || error);
     }

@@ -13,6 +13,11 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, Camera, Upload } from 'lucide-react-native';
 import { apiClient } from '../config/api';
 import { showToast } from '../components/ToastProvider';
+import { useAuth } from '../contexts/AuthContext';
+import { authService } from '../services/authService';
+import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
+import { exitLabUploadFlow } from '../utils/labUploadReturn';
+import { replaceOnboardingStep } from '../utils/onboardingNavigation';
 import { DF, DashboardPalette } from '../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../hooks/useDashboardTheme';
 
@@ -22,10 +27,27 @@ async function uploadPickedAsset(asset: ImagePicker.ImagePickerAsset) {
 
   if (Platform.OS === 'web' && asset.uri.startsWith('blob:')) {
     const blob = await fetch(asset.uri).then((r) => r.blob());
-    return apiClient.uploadLabFile(blob);
+    return apiClient.uploadMedicalRecordFile(blob);
   }
 
-  return apiClient.uploadLabFile({ uri: asset.uri, name, type });
+  return apiClient.uploadMedicalRecordFile({ uri: asset.uri, name, type });
+}
+
+function ocrToastMessage(result: Awaited<ReturnType<typeof apiClient.uploadMedicalRecordFile>>): string {
+  const summary = result.record?.content?.trim();
+  if (summary) return summary;
+
+  const extracted = result.ocr_extracted_values ?? {};
+  const parts = Object.entries(extracted)
+    .filter(([, cell]) => cell?.value != null)
+    .slice(0, 4)
+    .map(([key, cell]) => `${key.replace(/_/g, ' ')}: ${cell!.value}`);
+  if (parts.length) return parts.join(' · ');
+
+  if (result.ocr_status === 'partial') {
+    return 'Report saved. Some values could not be read — review the record.';
+  }
+  return 'Your record was scanned and saved.';
 }
 
 function createStyles(D: DashboardPalette) {
@@ -90,22 +112,35 @@ function createStyles(D: DashboardPalette) {
 
 export default function RecordsUploadScreen() {
   const router = useRouter();
+  const { refreshUser, user } = useAuth();
   const D = useD();
   const styles = useDashboardStyles(createStyles);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
 
-  const handleUploadSuccess = () => {
-    showToast.success('Report uploaded', 'Your record was scanned and saved.');
+  const handleUploadSuccess = async (
+    result?: Awaited<ReturnType<typeof apiClient.uploadMedicalRecordFile>>
+  ) => {
+    const message = result ? ocrToastMessage(result) : 'Your record was scanned and saved.';
+    showToast.success('Report uploaded', message);
+    await refreshUser();
+    const currentUser = await authService.getCurrentUser();
+    if (currentUser?.onboarding_completed !== true) {
+      const next = await resolveOnboardingRoute(currentUser);
+      replaceOnboardingStep(router, next);
+      return;
+    }
     router.replace('/(tabs)/records');
   };
 
-  const runUpload = async (runner: () => Promise<void>) => {
+  const runUpload = async (
+    runner: () => Promise<Awaited<ReturnType<typeof apiClient.uploadMedicalRecordFile>>>
+  ) => {
     try {
       setUploading(true);
-      await runner();
-      handleUploadSuccess();
+      const result = await runner();
+      await handleUploadSuccess(result);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Upload failed.';
       showToast.error('Upload', msg);
@@ -127,9 +162,7 @@ export default function RecordsUploadScreen() {
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     setFileName(asset.fileName || 'record-image.jpg');
-    await runUpload(async () => {
-      await uploadPickedAsset(asset);
-    });
+    await runUpload(async () => uploadPickedAsset(asset));
   };
 
   const takePhoto = async () => {
@@ -142,25 +175,26 @@ export default function RecordsUploadScreen() {
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     setFileName('camera-scan.jpg');
-    await runUpload(async () => {
-      await uploadPickedAsset(asset);
-    });
+    await runUpload(async () => uploadPickedAsset(asset));
   };
 
   const onWebFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
-    await runUpload(async () => {
-      await apiClient.uploadLabFile(file);
-    });
+    await runUpload(async () => apiClient.uploadMedicalRecordFile(file));
     event.target.value = '';
+  };
+
+  const handleBack = () => {
+    if (exitLabUploadFlow(router, '/(tabs)/records')) return;
+    router.back();
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Pressable style={styles.headerBtn} onPress={() => router.back()}>
+        <Pressable style={styles.headerBtn} onPress={handleBack}>
           <ArrowLeft size={22} color={D.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Upload Records</Text>

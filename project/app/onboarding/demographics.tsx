@@ -48,6 +48,7 @@ import {
   toApiGender,
 } from '../../utils/featureEnums';
 import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
 const DESKTOP_BREAKPOINT = 768;
@@ -314,7 +315,8 @@ export default function DemographicsOnboardingScreen() {
       await refreshUser();
       showToast.success('Profile saved', 'Next: tell us about your diabetes path.');
       const user = await authService.getCurrentUser();
-      router.replace(await resolveOnboardingRoute(user));
+      const next = await resolveOnboardingRoute(user);
+      replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save demographics.';
       showToast.error('Error', msg);

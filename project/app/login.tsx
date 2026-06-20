@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { showToast } from '../components/ToastProvider';
 import { needsOnboarding } from '../utils/authRouting';
 import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../utils/onboardingNavigation';
 import { authService } from '../services/authService';
 import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
@@ -49,7 +50,8 @@ export default function LoginScreen() {
       if (!needsOnboarding(currentUser)) {
         showToast.success('Welcome Back', 'Logged in successfully.');
       }
-      router.replace(await resolveOnboardingRoute(currentUser));
+      const next = await resolveOnboardingRoute(currentUser);
+      replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Google sign in failed';
       showToast.error('Login Failed', msg);
@@ -72,7 +74,8 @@ export default function LoginScreen() {
       if (!needsOnboarding(currentUser)) {
         showToast.success('Welcome Back', 'Logged in successfully.');
       }
-      router.replace(await resolveOnboardingRoute(currentUser));
+      const next = await resolveOnboardingRoute(currentUser);
+      replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Invalid credentials';
       showToast.error('Login Failed', msg);

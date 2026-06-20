@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start",
+    "dev:offline": "expo start --offline",
     "android": "expo run:android",
     "prebuild:android": "expo prebuild --platform android --clean",
     "build:web": "expo export --platform web",

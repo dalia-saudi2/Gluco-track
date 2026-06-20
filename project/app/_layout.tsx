@@ -11,7 +11,7 @@ import { HydrationReminderProvider } from '../contexts/HydrationReminderContext'
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { ToastProvider } from '../components/ToastProvider';
 import { ZoomOAuthHandler } from '../components/ZoomOAuthHandler';
-import { AuthGate, RootStack } from '../components/AuthGate';
+import { AuthGate } from '../components/AuthGate';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -49,7 +49,7 @@ export default function RootLayout() {
           <ToastProvider>
             <ZoomOAuthHandler />
             <AuthGate>
-              <RootStack />
+              <Stack screenOptions={{ headerShown: false }} />
             </AuthGate>
             <ThemedStatusBar />
           </ToastProvider>

@@ -9,6 +9,7 @@ import { apiClient } from '../../config/api';
 import { googleAuthService } from '../../services/googleAuthService';
 import { showToast } from '../../components/ToastProvider';
 import { VitalisProfileScreen } from '../../components/vitalis/VitalisProfileScreen';
+import { navigateToLabUpload } from '../../utils/navigateToLabUpload';
 import { D_LIGHT } from '../../constants/DashboardColors';
 
 const menuItems = [
@@ -293,7 +294,7 @@ export default function ProfileScreen() {
       menuItems={menuItems}
       profileCompletenessPct={profileCompletenessPct}
       labUploadPending={user?.lab_upload_pending}
-      onUploadLab={() => router.push('/onboarding/lab-upload' as never)}
+      onUploadLab={() => navigateToLabUpload(router, refreshUser, '/(tabs)/profile')}
     />
   );
 }

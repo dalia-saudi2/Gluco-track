@@ -20,6 +20,7 @@ import {
   INSULIN_REGIMEN_OPTIONS,
 } from '../../utils/featureEnums';
 import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 import { authService } from '../../services/authService';
 
@@ -100,7 +101,8 @@ export default function ClinicalProfileScreen() {
       });
       await refreshUser();
       const user = await authService.getCurrentUser();
-      router.replace(await resolveOnboardingRoute(user));
+      const next = await resolveOnboardingRoute(user);
+      replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       showToast.error('Error', e instanceof Error ? e.message : 'Could not save clinical profile.');
     } finally {

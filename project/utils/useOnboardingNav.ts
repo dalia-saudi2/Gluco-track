@@ -8,6 +8,7 @@ import {
   getPreviousOnboardingRoute,
   type OnboardingStepSlug,
 } from './onboardingSteps';
+import { replaceOnboardingStep } from './onboardingNavigation';
 
 export function useOnboardingNav(currentSlug: OnboardingStepSlug) {
   const router = useRouter();
@@ -43,7 +44,7 @@ export function useOnboardingNav(currentSlug: OnboardingStepSlug) {
 
   const goBack = useCallback(() => {
     if (previousRoute) {
-      router.replace(previousRoute);
+      replaceOnboardingStep(router, previousRoute);
     }
   }, [previousRoute, router]);
 

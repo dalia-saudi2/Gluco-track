@@ -89,7 +89,12 @@ export function historyToSyncPayload(
     recordsFromHistory(history30d),
     recordsFromHistory(history7d),
     [todayRecord(today)]
-  );
+  ).map((row) => ({
+    ...row,
+    steps: Math.round(row.steps ?? 0),
+    calories_burned: Math.round(row.calories_burned ?? 0),
+    sleep_hours: Number(row.sleep_hours ?? 0),
+  }));
 }
 
 function serverHistoryToClient(data: {

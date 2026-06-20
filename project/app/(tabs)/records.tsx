@@ -9,6 +9,7 @@ import { recordsService, Report, PatientHistory, Checkup } from '../../services/
 import { VitalisRecordsScreen } from '../../components/vitalis/VitalisRecordsScreen';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
+import { setLabUploadReturnTo } from '../../utils/labUploadReturn';
 
 function createModalStyles(D: DashboardPalette) {
   return {
@@ -325,7 +326,10 @@ export default function RecordsScreen() {
       onRefresh={handleRefresh}
       onRetry={fetchData}
       onLogout={handleLogout}
-      onUpload={() => router.push('/records-upload')}
+      onUpload={() => {
+        setLabUploadReturnTo('/(tabs)/records');
+        router.push('/records-upload');
+      }}
       onExportAll={() => Alert.alert('Export', 'Exporting all records...')}
       onViewHistory={(item) => {
         setModalData({ data: item, type: 'history' });

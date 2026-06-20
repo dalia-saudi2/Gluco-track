@@ -156,11 +156,11 @@ export class ApiClient {
 
         try {
           const errorData = JSON.parse(errorText);
-          errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
+          const detail = formatApiErrorDetail(errorData.detail ?? errorData.message);
+          errorMessage = detail ? `${endpoint}: ${detail}` : `${endpoint}: ${errorMessage}`;
         } catch {
-          // If parsing fails, use the text as is
           if (errorText) {
-            errorMessage = errorText;
+            errorMessage = `${endpoint}: ${errorText}`;
           }
         }
 
@@ -411,7 +411,6 @@ export class ApiClient {
       method: 'PATCH',
       body: JSON.stringify({
         onboarding_lab_opt_in: hasLabResults,
-        onboarding_completed: false,
       }),
     });
   }
@@ -470,6 +469,14 @@ export class ApiClient {
     });
   }
 
+  /** Server-side AI Gateway proxy (required on web — browser CORS blocks direct gateway calls). */
+  async chatLlm(messages: { role: string; content: string }[]): Promise<{ text: string }> {
+    return this.request('/chat/llm', {
+      method: 'POST',
+      body: JSON.stringify({ messages }),
+    });
+  }
+
   /** ISF / ICR personalization for glucose prediction */
   async patchDiabetesSettings(body: { isf_mg_dl_per_unit?: number; icr_grams_per_unit?: number }) {
     return this.request('/users/me/diabetes-settings', {
@@ -509,18 +516,53 @@ export class ApiClient {
     return this.request('/users/me/onboarding/progress');
   }
 
-  async uploadLabFile(file: Blob | { uri: string; name: string; type: string }) {
-    const url = `${this.baseUrl}/lab-uploads`;
+  async uploadLabFile(file: Blob | File | { uri: string; name: string; type: string }) {
+    return this.uploadMultipartFile('/lab-uploads', file);
+  }
+
+  /** Records page: Paddle OCR + save as patient medical record. */
+  async uploadMedicalRecordFile(file: Blob | File | { uri: string; name: string; type: string }) {
+    return this.uploadMultipartFile('/medical-records/upload', file) as Promise<{
+      record: {
+        id: number;
+        title: string;
+        content?: string | null;
+        file_url?: string | null;
+        record_type: string;
+        status: string;
+      };
+      ocr_status: string;
+      ocr_extracted_values?: Record<string, { value?: number; confidence?: number }>;
+      ocr_confidence_score?: number | null;
+      lab_upload_id?: number | null;
+    }>;
+  }
+
+  private async uploadMultipartFile(
+    endpoint: string,
+    file: Blob | File | { uri: string; name: string; type: string }
+  ) {
+    const url = `${this.baseUrl}${endpoint}`;
     const form = new FormData();
 
-    if (typeof Blob !== 'undefined' && file instanceof Blob) {
+    if (typeof Blob !== 'undefined' && (file instanceof Blob || file instanceof File)) {
       const uploadName =
-        typeof File !== 'undefined' && file instanceof File && file.name
-          ? file.name
-          : 'lab-report.jpg';
-      form.append('file', file, uploadName);
+        file instanceof File && file.name ? file.name : 'lab-report.jpg';
+      const uploadType = file.type || 'image/jpeg';
+      // Web FormData needs a File with a filename — raw Blob often yields 422 (missing file).
+      const uploadFile =
+        typeof File !== 'undefined' && !(file instanceof File)
+          ? new File([file], uploadName, { type: uploadType })
+          : file;
+      if (uploadFile.size === 0) {
+        throw new Error('The selected file is empty. Please choose another file.');
+      }
+      form.append('file', uploadFile, uploadName);
     } else {
       const native = file as { uri: string; name: string; type: string };
+      if (!native.uri) {
+        throw new Error('No file selected.');
+      }
       form.append('file', {
         uri: native.uri,
         name: native.name,
@@ -542,9 +584,13 @@ export class ApiClient {
       let errorMessage = `Upload failed (${response.status})`;
       try {
         const errorData = JSON.parse(errorText);
-        errorMessage = formatApiErrorDetail(errorData.detail ?? errorData.message) || errorMessage;
+        const detail = formatApiErrorDetail(errorData.detail ?? errorData.message);
+        errorMessage = detail || errorMessage;
       } catch {
         if (errorText) errorMessage = errorText;
+      }
+      if (response.status === 422) {
+        errorMessage = `Upload file rejected: ${errorMessage}. Try choosing the file again.`;
       }
       throw new Error(errorMessage);
     }

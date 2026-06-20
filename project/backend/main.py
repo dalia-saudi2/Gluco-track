@@ -23,6 +23,7 @@ from schemas import (
     Medication, MedicationCreate, MedicationUpdate,
     Message, MessageCreate,
     ChatMessage, ChatMessageCreate, ChatSession, ChatSessionCreate,
+    LlmChatRequest, LlmChatResponse,
     Token, DashboardData, GoogleAuthRequest,
     DiabetesSettingsUpdate,
     USDAFoodNutrients,
@@ -33,6 +34,7 @@ from schemas import (
 from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, normalize_email, verify_password
 from config import settings
 from deepseek_service import DeepSeekService
+from ai_gateway_service import AiGatewayService
 import usda_fdc
 import glucose_validation
 import glucose_ml_service
@@ -149,6 +151,28 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/health/llm")
+async def health_llm():
+    """Dev check: verifies AI Gateway key in backend/.env (no auth required)."""
+    from ai_gateway_service import AiGatewayService, _resolve_api_key
+
+    key = _resolve_api_key()
+    prefix = key[:8] if key else "missing"
+    if not key:
+        return {"ok": False, "key_prefix": prefix, "error": "AI_GATEWAY_API_KEY not set in backend/.env"}
+    if not key.startswith("vck_"):
+        return {
+            "ok": False,
+            "key_prefix": prefix,
+            "error": "Key must be a Vercel AI Gateway key (vck_…), not Gemini/Google",
+        }
+    try:
+        text = AiGatewayService.chat([{"role": "user", "content": "Say OK"}])
+        return {"ok": True, "key_prefix": prefix, "sample": text[:40]}
+    except Exception as e:
+        return {"ok": False, "key_prefix": prefix, "error": str(e)}
 
 # =================================================================
 # AUTHENTICATION ENDPOINTS
@@ -314,7 +338,9 @@ async def update_onboarding_lab_choice(
 ):
     current_user.onboarding_lab_opt_in = payload.onboarding_lab_opt_in
     if payload.onboarding_completed is not None:
-        current_user.onboarding_completed = payload.onboarding_completed
+        # Never downgrade a user who already finished onboarding (e.g. post-onboarding lab re-upload).
+        if not (current_user.onboarding_completed is True and payload.onboarding_completed is False):
+            current_user.onboarding_completed = payload.onboarding_completed
     elif payload.onboarding_lab_opt_in is False:
         current_user.onboarding_completed = True
     db.commit()
@@ -718,6 +744,22 @@ async def create_medication(
 # AI CHATBOT ENDPOINTS
 # =================================================================
 # Manages chat sessions and AI-driven medical assistance.
+@app.post("/chat/llm", response_model=LlmChatResponse)
+async def chat_llm_proxy(
+    body: LlmChatRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Proxy AI Gateway calls so Expo web avoids browser CORS on custom headers."""
+    del current_user
+    try:
+        text = AiGatewayService.chat([m.model_dump() for m in body.messages])
+        return LlmChatResponse(text=text)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM request failed: {e}") from e
+
+
 @app.post("/chat/sessions", response_model=ChatSession)
 async def create_chat_session(
     current_user: User = Depends(get_current_active_user),

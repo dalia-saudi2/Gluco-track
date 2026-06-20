@@ -108,6 +108,40 @@ def _process_with_paddle(file_path: Path, file_type: str) -> Dict[str, Any] | No
     }
 
 
+def _process_with_paddle_medical(file_path: Path, file_type: str) -> Dict[str, Any] | None:
+    """Full medical-report pipeline (PDF + images) via Paddle /medical-report/process."""
+    if not paddle_ocr_reachable():
+        return None
+    data = file_path.read_bytes()
+    medical = PaddleOCRService.process_medical_document(
+        data,
+        filename=file_path.name,
+        content_type=_content_type_for(file_type),
+    )
+    if not medical:
+        return None
+
+    extracted = map_paddle_to_lab_fields(medical)
+    lines = medical.get("ocr_lines") or []
+    raw_text = medical.get("text") or "\n".join(str(x) for x in lines)
+    status = overall_ocr_status(extracted)
+    if raw_text.strip() and status == "failed":
+        status = "partial"
+
+    return {
+        "ocr_status": status,
+        "ocr_raw_output": {
+            "engine": medical.get("engine") or "paddle_medical",
+            "text_preview": raw_text[:4000] if raw_text else "",
+            "char_count": len(raw_text),
+            "paddle_structured": medical.get("structured"),
+            "general_tests": medical.get("general_tests"),
+        },
+        "ocr_extracted_values": extracted,
+        "ocr_confidence_score": average_confidence(extracted) or float(medical.get("confidence") or 0),
+    }
+
+
 def process_lab_file(file_path: Path, file_type: str) -> Dict[str, Any]:
     paddle_result = _process_with_paddle(file_path, file_type)
     if paddle_result is not None:
@@ -130,3 +164,11 @@ def process_lab_file(file_path: Path, file_type: str) -> Dict[str, Any]:
         "ocr_extracted_values": extracted,
         "ocr_confidence_score": average_confidence(extracted),
     }
+
+
+def process_medical_report_file(file_path: Path, file_type: str) -> Dict[str, Any]:
+    """Records page: prefer full Paddle medical pipeline, then lab OCR, then local fallback."""
+    medical = _process_with_paddle_medical(file_path, file_type)
+    if medical is not None:
+        return medical
+    return process_lab_file(file_path, file_type)

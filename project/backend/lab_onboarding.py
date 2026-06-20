@@ -21,7 +21,7 @@ from lab_reminder_service import cancel_lab_reminders, ensure_pinned_lab_action,
 from models import DiabetesPrediction, LabUpload, MedicalRecord, PatientClinicalProfile, PatientMeasurement, User
 from patient_sync import sync_patient_from_user
 from risk_summary import build_risk_summary
-from ocr_service import process_lab_file
+from ocr_service import process_lab_file, process_medical_report_file
 from schemas import (
     ClinicalProfileUpdate,
     CompleteLabDataCreate,
@@ -30,6 +30,8 @@ from schemas import (
     HealthFeaturesResponse,
     LabUploadResponse,
     LabUploadReviewUpdate,
+    MedicalRecord as MedicalRecordSchema,
+    MedicalRecordUploadResponse,
     OnboardingProgress,
     DiabetesPredictionResponse,
     RiskSummary,
@@ -56,25 +58,48 @@ def _can_upload_lab_report(user: User) -> bool:
     )
 
 
-def _summary_from_ocr(extracted: dict) -> str:
+def _summary_from_ocr(extracted: dict, raw_output: dict | None = None) -> str:
     parts: list[str] = []
     for key, cell in extracted.items():
         if isinstance(cell, dict) and cell.get("value") is not None:
             label = key.replace("_", " ").title()
             parts.append(f"{label}: {cell['value']}")
+
+    raw = raw_output or {}
+    for test in raw.get("general_tests") or []:
+        if not isinstance(test, dict):
+            continue
+        name = test.get("test_name") or test.get("name")
+        val = test.get("value")
+        if name is None or val is None:
+            continue
+        unit = test.get("unit") or ""
+        suffix = f" {unit}".strip() if unit and unit != "-" else ""
+        parts.append(f"{name}: {val}{suffix}")
+
     if parts:
-        return "; ".join(parts[:8])
+        return "; ".join(parts[:12])
     return "Uploaded report — values extracted from your document."
 
 
-def _sync_medical_record_from_lab_upload(db: Session, user: User, upload: LabUpload) -> None:
+def _sync_medical_record_from_lab_upload(db: Session, user: User, upload: LabUpload) -> MedicalRecord:
     extracted = upload.ocr_extracted_values or {}
-    summary = _summary_from_ocr(extracted)
+    raw = upload.ocr_raw_output if isinstance(upload.ocr_raw_output, dict) else {}
+    summary = _summary_from_ocr(extracted, raw)
     title = "Lab Report"
     if upload.file_type == "pdf":
         title = "Lab Report (PDF)"
     elif upload.file_type in {"jpeg", "jpg", "png"}:
         title = "Lab Report (Scan)"
+
+    record_payload = {
+        "lab_upload_id": upload.id,
+        "ocr_status": upload.ocr_status,
+        "ocr_extracted_values": extracted,
+        "ocr_confidence_score": upload.ocr_confidence_score,
+        "general_tests": raw.get("general_tests"),
+        "text_preview": (raw.get("text_preview") or "")[:500],
+    }
 
     existing = (
         db.query(MedicalRecord)
@@ -83,31 +108,23 @@ def _sync_medical_record_from_lab_upload(db: Session, user: User, upload: LabUpl
     )
     if existing:
         existing.content = summary
-        existing.record_data = {
-            "lab_upload_id": upload.id,
-            "ocr_status": upload.ocr_status,
-            "ocr_extracted_values": extracted,
-        }
+        existing.record_data = record_payload
         existing.updated_at = datetime.utcnow()
-        return
+        return existing
 
-    db.add(
-        MedicalRecord(
-            patient_id=user.id,
-            record_type="lab",
-            title=title,
-            date=datetime.utcnow(),
-            provider=user.full_name or "Self-uploaded",
-            status="new",
-            file_url=upload.file_url,
-            content=summary,
-            record_data={
-                "lab_upload_id": upload.id,
-                "ocr_status": upload.ocr_status,
-                "ocr_extracted_values": extracted,
-            },
-        )
+    record = MedicalRecord(
+        patient_id=user.id,
+        record_type="lab",
+        title=title,
+        date=datetime.utcnow(),
+        provider=user.full_name or "Self-uploaded",
+        status="new",
+        file_url=upload.file_url,
+        content=summary,
+        record_data=record_payload,
     )
+    db.add(record)
+    return record
 
 
 def _latest_lab_upload(db: Session, user_id: int) -> Optional[LabUpload]:
@@ -288,6 +305,67 @@ async def upload_lab_report(
     db.commit()
     db.refresh(upload)
     return upload
+
+
+@router.post("/medical-records/upload", response_model=MedicalRecordUploadResponse)
+async def upload_medical_record_report(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a report from the Records page — Paddle OCR + save as patient medical record."""
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds maximum upload size.")
+
+    file_type = _normalize_file_type(file.filename or "upload", file.content_type)
+    lab_dir = Path(settings.upload_dir) / "lab" / str(current_user.id)
+    lab_dir.mkdir(parents=True, exist_ok=True)
+
+    stored_name = f"{uuid.uuid4().hex}.{file_type if file_type != 'jpeg' else 'jpg'}"
+    dest = lab_dir / stored_name
+    dest.write_bytes(content)
+
+    relative = f"lab/{current_user.id}/{stored_name}"
+    upload = LabUpload(
+        patient_id=current_user.id,
+        file_url=_public_file_url(relative),
+        file_type=file_type,
+        file_size_kb=max(1, len(content) // 1024),
+        ocr_status="processing",
+    )
+    db.add(upload)
+    db.commit()
+    db.refresh(upload)
+
+    try:
+        ocr_result = process_medical_report_file(dest, file_type)
+    except Exception as ocr_exc:
+        ocr_result = {
+            "ocr_status": "partial",
+            "ocr_raw_output": {"engine": "error", "error": str(ocr_exc)[:300]},
+            "ocr_extracted_values": {},
+            "ocr_confidence_score": 0.0,
+        }
+
+    upload.ocr_status = ocr_result["ocr_status"]
+    upload.ocr_raw_output = ocr_result["ocr_raw_output"]
+    upload.ocr_extracted_values = ocr_result["ocr_extracted_values"]
+    upload.ocr_confidence_score = ocr_result["ocr_confidence_score"]
+    upload.processed_at = datetime.utcnow()
+
+    record = _sync_medical_record_from_lab_upload(db, current_user, upload)
+    db.commit()
+    db.refresh(upload)
+    db.refresh(record)
+
+    return MedicalRecordUploadResponse(
+        record=MedicalRecordSchema.model_validate(record),
+        ocr_status=upload.ocr_status,
+        ocr_extracted_values=upload.ocr_extracted_values,
+        ocr_confidence_score=upload.ocr_confidence_score,
+        lab_upload_id=upload.id,
+    )
 
 
 @router.get("/lab-uploads/current", response_model=LabUploadResponse)

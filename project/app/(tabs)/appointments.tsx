@@ -12,9 +12,10 @@ import { openExternalUrl } from '../../utils/openExternalUrl';
 import { callDoctor, getZoomAuthorizeUrl, getZoomOAuthStatus } from '../../services/zoomService';
 import { confirmAction, showAlert } from '../../utils/alert';
 import { showToast } from '../../components/ToastProvider';
+import { navigateToLabUpload } from '../../utils/navigateToLabUpload';
 
 export default function AppointmentsScreen() {
-  const { isAuthenticated, isLoading: authIsLoading, user } = useAuth();
+  const { isAuthenticated, isLoading: authIsLoading, user, refreshUser } = useAuth();
   const handleLogout = useLogoutAndRedirect();
   const router = useRouter();
 
@@ -427,7 +428,7 @@ export default function AppointmentsScreen() {
           labUploadPending={Boolean(user?.lab_upload_pending)}
           onUploadLabBeforeAppointment={() => {
             setBookingVisible(false);
-            router.push('/onboarding/lab-upload' as never);
+            navigateToLabUpload(router, refreshUser, '/(tabs)/appointments');
           }}
         />
       }

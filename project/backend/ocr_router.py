@@ -38,7 +38,7 @@ async def health_ocr():
     ok = paddle_ocr_reachable()
     return {
         "ok": ok,
-        "message": "Paddle OCR is reachable" if ok else "Start Paddle OCR: python run_paddle_ocr.py",
+        "message": "Paddle OCR is reachable" if ok else "Start Paddle OCR: cd project/paddle_ocr_backend && python run_paddle_ocr.py",
     }
 
 
@@ -51,7 +51,7 @@ async def ocr_scan(
     if not paddle_ocr_reachable():
         raise HTTPException(
             status_code=503,
-            detail="Paddle OCR service is not running. Start it with: python run_paddle_ocr.py",
+            detail="Paddle OCR service is not running. Start it from project/paddle_ocr_backend (run_paddle_ocr.py).",
         )
 
     data = await file.read()

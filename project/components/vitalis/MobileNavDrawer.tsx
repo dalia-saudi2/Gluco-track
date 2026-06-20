@@ -14,6 +14,7 @@ import { DF, DashboardPalette } from '../../constants/DashboardColors';
 import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
 import { VITALIS_NAV, VitalisNavId } from './vitalisNav';
 import { DiabetesCareHubBrand } from '../brand/DiabetesCareHubBrand';
+import { blurActiveElement } from '../../utils/blurActiveElement';
 
 type Props = {
   visible: boolean;
@@ -44,7 +45,7 @@ export function MobileNavDrawer({
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 260,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     } else {
       slideAnim.setValue(-DRAWER_WIDTH);
@@ -60,6 +61,7 @@ export function MobileNavDrawer({
     .toUpperCase();
 
   const goTo = (route: string) => {
+    blurActiveElement();
     onClose();
     router.push(route as never);
   };

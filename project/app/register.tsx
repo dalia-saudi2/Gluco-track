@@ -29,6 +29,7 @@ import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
 import { AuthTextField } from '../components/auth/AuthTextField';
 import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../utils/onboardingNavigation';
 import { authService } from '../services/authService';
 import { validateRegistration } from '../utils/authValidation';
 
@@ -75,7 +76,8 @@ export default function RegisterScreen() {
 
       showToast.success('Account Created', 'Welcome! Complete your profile next.');
       const user = await authService.getCurrentUser();
-      router.replace(await resolveOnboardingRoute(user));
+      const next = await resolveOnboardingRoute(user);
+      replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'An error occurred';
       showToast.error('Registration Failed', msg);

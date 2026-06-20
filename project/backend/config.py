@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic import field_validator
 from pathlib import Path
 from typing import List
@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     
     # DeepSeek API - load from environment variable DEEPSEEK_API_KEY
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+
+    # Vercel AI Gateway — used by /chat/llm proxy (required for Expo web chat)
+    ai_gateway_api_key: str = ""
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Prefer backend/.env over stale OS-level env vars (common on Windows dev machines).
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
     # USDA FoodData Central (optional; meal carb lookup)
     usda_fdc_api_key: str = os.getenv("USDA_FDC_API_KEY", "")

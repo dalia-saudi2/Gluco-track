@@ -17,6 +17,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { LabOnboardingColors as C } from '../../constants/LabOnboardingColors';
 import { LAB_OCR_FIELDS, type ExtractedLabField, type LabFieldKey } from '../../utils/labOnboarding';
 import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
+import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
+import { consumeLabUploadReturnTo, exitLabUploadFlow, peekLabUploadReturnTo } from '../../utils/labUploadReturn';
 import { authService } from '../../services/authService';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
@@ -138,12 +140,13 @@ export default function LabReviewScreen() {
             ? `Your score is now ${score.toFixed(0)} based on all health indicators.`
             : 'Your health profile is now complete.'
         );
-        router.replace('/(tabs)');
+        router.replace(consumeLabUploadReturnTo('/(tabs)'));
       } else {
         showToast.success('Saved', 'Continue with lifestyle and body measurements.');
         await refreshUser();
         const refreshed = await authService.getCurrentUser();
-        router.replace(await resolveOnboardingRoute(refreshed));
+        const next = await resolveOnboardingRoute(refreshed);
+        replaceOnboardingStep(router, next);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save review.';
@@ -151,6 +154,13 @@ export default function LabReviewScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const hasReturnRoute = Boolean(peekLabUploadReturnTo());
+
+  const handleBack = () => {
+    if (exitLabUploadFlow(router)) return;
+    goBack();
   };
 
   if (loading) {
@@ -164,8 +174,8 @@ export default function LabReviewScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.header}>
-        {canGoBack ? (
-          <Pressable style={styles.headerBtn} onPress={goBack}>
+        {canGoBack || hasReturnRoute ? (
+          <Pressable style={styles.headerBtn} onPress={handleBack}>
             <ArrowLeft size={22} color={C.primary} />
           </Pressable>
         ) : (

@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { showToast } from '../../components/ToastProvider';
 import { OnboardingColors as C } from '../../constants/OnboardingColors';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
+import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 
 const FONT = { bold: 'DMSans_700Bold', medium: 'DMSans_500Medium' };
 
@@ -28,7 +29,10 @@ export default function DiabeticPathScreen() {
       setSubmitting(true);
       await apiClient.updateDiabeticPath(isDiabetic);
       await refreshUser();
-      router.replace(isDiabetic ? '/onboarding/clinical-profile' : '/onboarding/lab-choice');
+      replaceOnboardingStep(
+        router,
+        isDiabetic ? '/onboarding/clinical-profile' : '/onboarding/lab-choice'
+      );
     } catch (e: unknown) {
       showToast.error('Error', e instanceof Error ? e.message : 'Could not save your choice.');
     } finally {

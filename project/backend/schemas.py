@@ -339,6 +339,15 @@ class MedicalRecord(MedicalRecordBase):
     class Config:
         from_attributes = True
 
+
+class MedicalRecordUploadResponse(BaseModel):
+    """Result of POST /medical-records/upload (file + Paddle OCR → patient report)."""
+    record: MedicalRecord
+    ocr_status: str
+    ocr_extracted_values: Optional[dict] = None
+    ocr_confidence_score: Optional[float] = None
+    lab_upload_id: Optional[int] = None
+
 # Medication Schemas
 class MedicationBase(BaseModel):
     name: str
@@ -424,6 +433,19 @@ class ChatSession(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class LlmChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class LlmChatRequest(BaseModel):
+    messages: List[LlmChatMessage]
+
+
+class LlmChatResponse(BaseModel):
+    text: str
 
 # Authentication Schemas
 class Token(BaseModel):
@@ -701,15 +723,19 @@ class HealthActivitySyncRecord(BaseModel):
     sleep_hours: float = 0
     calories_burned: int = 0
 
-    @field_validator("steps", "calories_burned")
+    @field_validator("steps", "calories_burned", mode="before")
     @classmethod
-    def non_negative_int(cls, v: int) -> int:
-        return max(0, v)
+    def coerce_non_negative_int(cls, v):
+        if v is None:
+            return 0
+        return max(0, int(round(float(v))))
 
-    @field_validator("sleep_hours")
+    @field_validator("sleep_hours", mode="before")
     @classmethod
-    def non_negative_sleep(cls, v: float) -> float:
-        return max(0.0, v)
+    def coerce_non_negative_sleep(cls, v):
+        if v is None:
+            return 0.0
+        return max(0.0, float(v))
 
 
 class HealthActivitySyncRequest(BaseModel):
