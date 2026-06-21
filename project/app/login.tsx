@@ -19,6 +19,7 @@ import { needsOnboarding } from '../utils/authRouting';
 import { resolveOnboardingRoute } from '../utils/resolveOnboardingRoute';
 import { replaceOnboardingStep } from '../utils/onboardingNavigation';
 import { authService } from '../services/authService';
+import { apiClient } from '../config/api';
 import { AuthColors as C, AuthFont as F } from '../constants/AuthColors';
 import { AuthBrandPanel } from '../components/auth/AuthBrandPanel';
 import * as WebBrowser from 'expo-web-browser';
@@ -47,10 +48,11 @@ export default function LoginScreen() {
       setIsLoading(true);
       await loginWithGoogle(token);
       const currentUser = await authService.getCurrentUser();
-      if (!needsOnboarding(currentUser)) {
+      const progress = await apiClient.getOnboardingProgress();
+      if (!needsOnboarding(currentUser, progress)) {
         showToast.success('Welcome Back', 'Logged in successfully.');
       }
-      const next = await resolveOnboardingRoute(currentUser);
+      const next = await resolveOnboardingRoute(currentUser, progress);
       replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Google sign in failed';
@@ -71,10 +73,11 @@ export default function LoginScreen() {
       setIsLoading(true);
       await login(validation.email, password);
       const currentUser = await authService.getCurrentUser();
-      if (!needsOnboarding(currentUser)) {
+      const progress = await apiClient.getOnboardingProgress();
+      if (!needsOnboarding(currentUser, progress)) {
         showToast.success('Welcome Back', 'Logged in successfully.');
       }
-      const next = await resolveOnboardingRoute(currentUser);
+      const next = await resolveOnboardingRoute(currentUser, progress);
       replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Invalid credentials';

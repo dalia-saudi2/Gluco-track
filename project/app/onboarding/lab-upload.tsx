@@ -16,10 +16,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiClient } from '../../config/api';
 import { showToast } from '../../components/ToastProvider';
 import { LabOnboardingColors as C } from '../../constants/LabOnboardingColors';
-import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
 import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 import { exitLabUploadFlow, peekLabUploadReturnTo } from '../../utils/labUploadReturn';
-import { authService } from '../../services/authService';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
 const FONT = { medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
@@ -47,15 +45,7 @@ export default function LabUploadScreen() {
   const handleUploadSuccess = async () => {
     showToast.success('Upload complete', 'Review extracted values next.');
     await refreshUser();
-    const currentUser = await authService.getCurrentUser();
-
-    if (currentUser?.onboarding_completed || peekLabUploadReturnTo()) {
-      replaceOnboardingStep(router, '/onboarding/lab-review');
-      return;
-    }
-
-    const next = await resolveOnboardingRoute(currentUser);
-    replaceOnboardingStep(router, next);
+    replaceOnboardingStep(router, '/onboarding/lab-review');
   };
 
   const hasReturnRoute = Boolean(peekLabUploadReturnTo());
@@ -85,7 +75,7 @@ export default function LabUploadScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.9,
     });
     if (result.canceled || !result.assets[0]) return;

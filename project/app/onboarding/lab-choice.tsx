@@ -14,9 +14,7 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, HelpCircle, Upload, FileEdit } from 'lucide-react-native';
 import { apiClient } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { authService } from '../../services/authService';
 import { showToast } from '../../components/ToastProvider';
-import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
 import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 import { LabChoiceColors as C } from '../../constants/LabOnboardingColors';
@@ -45,12 +43,12 @@ export default function LabChoiceScreen() {
       const hasLab = choice === 'yes';
       await apiClient.updateOnboardingLabChoice(hasLab);
       await refreshUser();
-      const user = await authService.getCurrentUser();
-      const route = await resolveOnboardingRoute(user);
       if (choice === 'no') {
         showToast.success('All set', 'Enter your health measurements next.');
+        replaceOnboardingStep(router, '/onboarding/health-features');
+      } else {
+        replaceOnboardingStep(router, '/onboarding/lab-upload');
       }
-      replaceOnboardingStep(router, route);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save your choice.';
       showToast.error('Error', msg);

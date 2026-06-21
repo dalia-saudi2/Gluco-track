@@ -240,6 +240,10 @@ export class ApiClient {
     blood_type?: string;
     address?: string;
     gender?: string;
+    age?: number;
+    height_cm?: number;
+    weight_kg?: number;
+    date_of_birth?: string;
   }) {
     return this.request('/auth/register', {
       method: 'POST',
@@ -397,6 +401,10 @@ export class ApiClient {
       method: 'PATCH',
       body: JSON.stringify({ is_diabetic_path: isDiabeticPath }),
     });
+  }
+
+  async getClinicalProfile() {
+    return this.request('/users/me/clinical-profile');
   }
 
   async updateClinicalProfile(body: Record<string, unknown>) {
@@ -625,8 +633,19 @@ export class ApiClient {
     });
   }
 
+  async submitLabVisit(body: Record<string, unknown>) {
+    return this.request('/users/me/lab-visits', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   async getRiskSummary() {
     return this.request('/users/me/risk-summary');
+  }
+
+  async rerunPrediction() {
+    return this.request('/users/me/rerun-prediction', { method: 'POST' });
   }
 
   async getAppNotifications() {
@@ -657,6 +676,28 @@ export class ApiClient {
     return this.request(`/api/patients/${patientId}/water-intake/add`, {
       method: 'POST',
       body: JSON.stringify({ amount_ml: amountMl }),
+    });
+  }
+
+  async getNutritionToday(patientId: number) {
+    return this.request(`/api/patients/${patientId}/nutrition/today`);
+  }
+
+  async logMealNutrition(
+    patientId: number,
+    body: {
+      source: string;
+      meal_label?: string;
+      calories?: number;
+      carbs_g?: number;
+      protein_g?: number;
+      fat_g?: number;
+      foods_json?: unknown[];
+    }
+  ) {
+    return this.request(`/api/patients/${patientId}/nutrition/meals`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   }
 

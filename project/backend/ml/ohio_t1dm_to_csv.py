@@ -26,47 +26,47 @@ def load_patient_xml(path: Path) -> Tuple[int, pd.DataFrame, List[dict], List[di
     root = tree.getroot()
     patient_id = int(root.attrib.get("id", "0"))
 
-    glucose_rows = []
-    for ev in root.find("glucose_level").findall("event"):
-        glucose_rows.append({"ts": parse_ts(ev.attrib["ts"]), "glucose": float(ev.attrib["value"])})
+    glucose_rows = [
+        {"ts": parse_ts(ev.attrib["ts"]), "glucose": float(ev.attrib["value"])}
+        for ev in root.find("glucose_level").findall("event")
+    ]
     gdf = pd.DataFrame(glucose_rows).sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
 
     meals = []
     meal_node = root.find("meal")
     if meal_node is not None:
-        for ev in meal_node.findall("event"):
-            meals.append(
-                {
-                    "ts": parse_ts(ev.attrib["ts"]),
-                    "carbs": float(ev.attrib.get("carbs", 0) or 0),
-                    "meal_type": ev.attrib.get("type", ""),
-                }
-            )
+        meals = [
+            {
+                "ts": parse_ts(ev.attrib["ts"]),
+                "carbs": float(ev.attrib.get("carbs", 0) or 0),
+                "meal_type": ev.attrib.get("type", ""),
+            }
+            for ev in meal_node.findall("event")
+        ]
 
     boluses = []
     bolus_node = root.find("bolus")
     if bolus_node is not None:
-        for ev in bolus_node.findall("event"):
-            ts = ev.attrib.get("ts_begin") or ev.attrib.get("ts")
-            boluses.append(
-                {
-                    "ts": parse_ts(ts),
-                    "dose": float(ev.attrib.get("dose", 0) or 0),
-                    "bwz_carbs": float(ev.attrib.get("bwz_carb_input", 0) or 0),
-                }
-            )
+        boluses = [
+            {
+                "ts": parse_ts(ev.attrib.get("ts_begin") or ev.attrib.get("ts")),
+                "dose": float(ev.attrib.get("dose", 0) or 0),
+                "bwz_carbs": float(ev.attrib.get("bwz_carb_input", 0) or 0),
+            }
+            for ev in bolus_node.findall("event")
+        ]
 
     exercises = []
     ex_node = root.find("exercise")
     if ex_node is not None:
-        for ev in ex_node.findall("event"):
-            exercises.append(
-                {
-                    "ts": parse_ts(ev.attrib["ts"]),
-                    "duration": float(ev.attrib.get("duration", 0) or 0),
-                    "intensity": float(ev.attrib.get("intensity", 0) or 0),
-                }
-            )
+        exercises = [
+            {
+                "ts": parse_ts(ev.attrib["ts"]),
+                "duration": float(ev.attrib.get("duration", 0) or 0),
+                "intensity": float(ev.attrib.get("intensity", 0) or 0),
+            }
+            for ev in ex_node.findall("event")
+        ]
 
     return patient_id, gdf, meals, boluses, exercises
 

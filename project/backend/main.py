@@ -1,6 +1,7 @@
 from __future__ import annotations
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -11,7 +12,7 @@ import requests
 import json
 
 from database import get_db, create_tables
-from models import User, Appointment as AppointmentModel, MedicalRecord as MedicalRecordModel, Medication as MedicationModel, Message as MessageModel, ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel
+from models import User, Appointment as AppointmentModel, MedicalRecord as MedicalRecordModel, Medication as MedicationModel, Message as MessageModel, ChatSession as ChatSessionModel, ChatMessage as ChatMessageModel, PatientMeasurement as PatientMeasurementModel, PatientLabVisit as PatientLabVisitModel
 from schemas import (
     UserCreate, User as UserSchema, UserUpdate, PasswordChange,
     OnboardingDemographicsUpdate,
@@ -42,11 +43,14 @@ import dexcom_integration
 from lab_onboarding import router as lab_onboarding_router
 from glucose_readings_router import router as glucose_readings_router
 from water_intake_router import router as water_intake_router
+from nutrition_router import router as nutrition_router
 from health_activity_router import router as health_activity_router
 from doctor_chat_router import router as doctor_chat_router
 from places_router import router as places_router
 from zoom_router import router as zoom_router
 from ocr_router import router as ocr_router
+from complications_router import router as complications_router
+from staging_router import router as staging_router
 from telehealth_service import (
     TelehealthPlatform,
     create_telehealth_meeting,
@@ -114,6 +118,18 @@ async def startup_event():
         print(f"[OK] DeepSeek API key loaded (length: {len(settings.deepseek_api_key)})")
     else:
         print("WARNING: DeepSeek API key is not set! Check your .env file.")
+    try:
+        from complications_service import init_complications_model
+        init_complications_model()
+        print("[OK] Complications model artifacts loaded")
+    except Exception as exc:
+        print(f"WARNING: Complications model failed to load: {exc}")
+    try:
+        from ml.staging import warmup_models
+        warmup_models()
+        print("[OK] Diabetes staging LR models loaded")
+    except Exception as exc:
+        print(f"WARNING: Diabetes staging models failed to load: {exc}")
 
 # CORS middleware — allow any localhost port in SQLite dev mode (Expo web uses varying ports)
 _dev_sqlite = settings.database_url.startswith("sqlite")
@@ -130,17 +146,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Return JSON 500s so CORSMiddleware can attach headers (avoids fake CORS errors in the browser)."""
+    if isinstance(exc, HTTPException):
+        raise exc
+    print(f"Unhandled error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 # Create database tables
 create_tables()
 
 app.include_router(lab_onboarding_router)
 app.include_router(glucose_readings_router)
 app.include_router(water_intake_router)
+app.include_router(nutrition_router)
 app.include_router(health_activity_router)
 app.include_router(doctor_chat_router)
 app.include_router(places_router)
 app.include_router(zoom_router)
 app.include_router(ocr_router)
+app.include_router(complications_router)
+app.include_router(staging_router)
 
 # Root endpoint
 @app.get("/")
@@ -181,6 +210,8 @@ async def health_llm():
 @app.post("/auth/register", response_model=UserSchema)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
+    from clinical_notification_service import ensure_clinical_profile_notification
+
     email = normalize_email(user.email)
 
     if existing := db.query(User).filter(func.lower(User.email) == email).first():
@@ -188,6 +219,9 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
         )
+
+    height_m = user.height_cm / 100.0
+    bmi_str = str(round(user.weight_kg / (height_m * height_m), 1))
 
     hashed_password = get_password_hash(user.password)
     db_user = User(
@@ -200,6 +234,10 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         emergency_contact=user.emergency_contact,
         address=user.address,
         gender=user.gender,
+        age=user.age,
+        height_cm=user.height_cm,
+        weight_kg=user.weight_kg,
+        bmi=bmi_str,
         is_active=True,
         onboarding_completed=False,
     )
@@ -214,6 +252,9 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered",
         ) from None
     db.refresh(db_user)
+
+    ensure_clinical_profile_notification(db, db_user.id)
+    db.commit()
 
     return db_user
 
@@ -277,6 +318,9 @@ async def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)
             db.add(user)
             db.commit()
             db.refresh(user)
+            from clinical_notification_service import ensure_clinical_profile_notification
+            ensure_clinical_profile_notification(db, user.id)
+            db.commit()
         else:
             # Update google fields if missing
             updated = False
@@ -337,12 +381,10 @@ async def update_onboarding_lab_choice(
     db: Session = Depends(get_db),
 ):
     current_user.onboarding_lab_opt_in = payload.onboarding_lab_opt_in
-    if payload.onboarding_completed is not None:
-        # Never downgrade a user who already finished onboarding (e.g. post-onboarding lab re-upload).
-        if not (current_user.onboarding_completed is True and payload.onboarding_completed is False):
-            current_user.onboarding_completed = payload.onboarding_completed
-    elif payload.onboarding_lab_opt_in is False:
-        current_user.onboarding_completed = True
+    if payload.onboarding_completed is not None and (
+        current_user.onboarding_completed is not True or payload.onboarding_completed is True
+    ):
+        current_user.onboarding_completed = payload.onboarding_completed
     db.commit()
     db.refresh(current_user)
     return current_user
@@ -443,8 +485,11 @@ async def get_dashboard_data(
             except (json.JSONDecodeError, TypeError):
                 record.record_data = None
     
-    # Get current medications (active ones first, then all if none active)
-    current_medications = db.query(MedicationModel).filter(
+    # Sync clinical-profile medication list into schedulable rows, then load active meds
+    from medication_sync import sync_medications_from_clinical_profile
+
+    synced = sync_medications_from_clinical_profile(db, current_user.id)
+    current_medications = synced or db.query(MedicationModel).filter(
         MedicationModel.patient_id == current_user.id,
         MedicationModel.is_active == True
     ).all() or db.query(MedicationModel).filter(
@@ -457,11 +502,63 @@ async def get_dashboard_data(
         MessageModel.is_read == False
     ).count()
     
+    latest_measurement = (
+        db.query(PatientMeasurementModel)
+        .filter(
+            PatientMeasurementModel.patient_id == current_user.id,
+            PatientMeasurementModel.is_current.is_(True),
+        )
+        .order_by(PatientMeasurementModel.created_at.desc())
+        .first()
+    )
+
+    latest_lab_visit = (
+        db.query(PatientLabVisitModel)
+        .filter(PatientLabVisitModel.patient_id == current_user.id)
+        .order_by(PatientLabVisitModel.visit_date.desc())
+        .first()
+    )
+
+    hba1c = None
+    hba1c_measured_at = None
+    if latest_measurement and latest_measurement.hba1c is not None:
+        hba1c = float(latest_measurement.hba1c)
+        hba1c_measured_at = latest_measurement.measured_at or latest_measurement.created_at
+    elif latest_lab_visit and latest_lab_visit.hba1c is not None:
+        hba1c = float(latest_lab_visit.hba1c)
+        hba1c_measured_at = datetime.combine(latest_lab_visit.visit_date, datetime.min.time())
+
+    weight_kg = None
+    height_cm = None
+    bmi_value = None
+    bmi_group = None
+    if latest_measurement:
+        weight_kg = latest_measurement.weight_kg
+        height_cm = latest_measurement.height_cm
+        bmi_value = latest_measurement.bmi
+        bmi_group = latest_measurement.bmi_group
+    elif current_user.weight_kg is not None:
+        weight_kg = current_user.weight_kg
+        height_cm = current_user.height_cm
+    if bmi_value is None and current_user.bmi:
+        try:
+            bmi_value = float(current_user.bmi)
+        except (TypeError, ValueError):
+            bmi_value = None
+    if bmi_value is None and weight_kg and height_cm and height_cm > 0:
+        height_m = height_cm / 100.0
+        bmi_value = round(weight_kg / (height_m * height_m), 1)
+
     # Calculate health metrics
     health_metrics = {
         "blood_type": current_user.blood_type,
-        "bmi": current_user.bmi or None,
+        "bmi": str(bmi_value) if bmi_value is not None else (current_user.bmi or None),
         "blood_pressure": current_user.blood_pressure or None,
+        "weight_kg": weight_kg,
+        "height_cm": height_cm,
+        "bmi_group": bmi_group,
+        "hba1c": hba1c,
+        "hba1c_measured_at": hba1c_measured_at.isoformat() if hba1c_measured_at else None,
         "total_appointments": len(upcoming_appointments),
         "active_medications": len(current_medications),
         "unread_messages": unread_messages
@@ -722,7 +819,9 @@ async def get_medications(
     db: Session = Depends(get_db)
 ):
     """Get all medications for the current user."""
-    return db.query(MedicationModel).filter(MedicationModel.patient_id == current_user.id).all()
+    from medication_sync import sync_medications_from_clinical_profile
+
+    return sync_medications_from_clinical_profile(db, current_user.id)
 
 @app.post("/medications", response_model=Medication)
 async def create_medication(

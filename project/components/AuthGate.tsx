@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useSegments, usePathname } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,50 +6,40 @@ import { getOnboardingRoute, needsOnboarding } from '../utils/authRouting';
 import { isOnboardingStepAllowed, routeSegmentToSlug } from '../utils/onboardingSteps';
 import { replaceOnboardingStep, routesMatch } from '../utils/onboardingNavigation';
 import { isLabOcrOnboardingRoute } from '../utils/navigateToLabUpload';
-import { peekLabUploadReturnTo, peekTabsReturnAfterFlowExit, clearTabsReturnAfterFlowExit } from '../utils/labUploadReturn';
-import { apiClient } from '../config/api';
-import type { OnboardingProgress } from '../utils/labOnboarding';
+import {
+  peekLabUploadReturnTo,
+  peekTabsReturnAfterFlowExit,
+  clearTabsReturnAfterFlowExit,
+  clearLabUploadReturnTo,
+} from '../utils/labUploadReturn';
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading,
+    user,
+    onboardingProgress,
+    onboardingProgressLoading,
+    getOnboardingProgressForRouting,
+  } = useAuth();
   const router = useRouter();
   const segments = useSegments();
   const pathname = usePathname();
   const lastRedirectRef = useRef<string | null>(null);
-
-  const [progress, setProgress] = useState<OnboardingProgress | null>(null);
-  const [progressLoading, setProgressLoading] = useState(false);
+  const prevNeedsOnboardingRef = useRef<boolean | null>(null);
+  const progress = getOnboardingProgressForRouting();
+  const progressLoading = onboardingProgressLoading;
 
   useEffect(() => {
-    if (!isAuthenticated || !needsOnboarding(user)) {
-      setProgress(null);
-      return;
+    const needs = needsOnboarding(user, progress);
+    if (prevNeedsOnboardingRef.current === true && needs === false) {
+      clearLabUploadReturnTo();
     }
-
-    let cancelled = false;
-    setProgressLoading(true);
-    apiClient
-      .getOnboardingProgress()
-      .then((p) => {
-        if (!cancelled) setProgress(p);
-      })
-      .catch(() => {
-        if (!cancelled) setProgress(null);
-      })
-      .finally(() => {
-        if (!cancelled) setProgressLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, user?.id, user?.onboarding_completed, user?.is_diabetic_path, user?.onboarding_lab_opt_in]);
-
-  useEffect(() => {
-    if (!needsOnboarding(user)) {
+    prevNeedsOnboardingRef.current = needs;
+    if (!needs) {
       clearTabsReturnAfterFlowExit();
     }
-  }, [user?.onboarding_completed]);
+  }, [user?.onboarding_completed, progress?.health_features_done]);
 
   useEffect(() => {
     if (isLoading || progressLoading) return;
@@ -60,6 +50,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     const onOnboarding = root === 'onboarding';
     const onIndex = !root || (root as string) === 'index';
     const onRecordsUpload = root === 'records-upload';
+    const onClinicalProfile = root === 'complete-health-profile';
 
     if (!isAuthenticated) {
       if (!onLogin && !onRegister && root !== 'fresh-start') {
@@ -68,7 +59,17 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (needsOnboarding(user)) {
+    if (onClinicalProfile || onRecordsUpload || root === 'doctor-chat') {
+      lastRedirectRef.current = null;
+      return;
+    }
+
+    if (onOnboarding && isLabOcrOnboardingRoute(segments[1]) && peekLabUploadReturnTo()) {
+      lastRedirectRef.current = null;
+      return;
+    }
+
+    if (needsOnboarding(user, progress)) {
       // Allow lab upload flow and doctor chat while onboarding is incomplete.
       if (onRecordsUpload || root === 'doctor-chat') {
         lastRedirectRef.current = null;
@@ -116,11 +117,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if ((onLogin || onRegister || onOnboarding || onIndex) && !onRecordsUpload) {
+      if (onOnboarding && isLabOcrOnboardingRoute(segments[1]) && peekLabUploadReturnTo()) {
+        return;
+      }
       router.replace('/(tabs)');
     }
-  }, [isLoading, progressLoading, isAuthenticated, user, progress, segments, pathname, router]);
+  }, [isLoading, progressLoading, isAuthenticated, user, onboardingProgress, progress, segments, pathname, router]);
 
-  const showLoading = isLoading || (isAuthenticated && needsOnboarding(user) && progressLoading);
+  const showLoading = isLoading || (isAuthenticated && needsOnboarding(user, progress) && progressLoading);
 
   return (
     <>

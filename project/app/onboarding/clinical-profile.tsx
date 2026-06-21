@@ -19,8 +19,8 @@ import {
   DIABETES_TYPE_OPTIONS,
   INSULIN_REGIMEN_OPTIONS,
 } from '../../utils/featureEnums';
-import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
 import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
+import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 import { authService } from '../../services/authService';
 
@@ -55,7 +55,7 @@ function YesNo({
 
 export default function ClinicalProfileScreen() {
   const router = useRouter();
-  const { refreshUser } = useAuth();
+  const { refreshUser, refreshOnboardingProgress } = useAuth();
   const { goBack, canGoBack, stepInfo } = useOnboardingNav('clinical-profile');
   const [diabetesType, setDiabetesType] = useState<string | null>(null);
   const [yearDx, setYearDx] = useState('');
@@ -100,8 +100,10 @@ export default function ClinicalProfileScreen() {
         hypertension_history: hypertension,
       });
       await refreshUser();
-      const user = await authService.getCurrentUser();
-      const next = await resolveOnboardingRoute(user);
+      await refreshOnboardingProgress();
+      const currentUser = await authService.getCurrentUser();
+      const progress = await apiClient.getOnboardingProgress();
+      const next = await resolveOnboardingRoute(currentUser, progress);
       replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       showToast.error('Error', e instanceof Error ? e.message : 'Could not save clinical profile.');

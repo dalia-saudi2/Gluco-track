@@ -97,7 +97,28 @@ The API will be available at `http://localhost:8000`
 - `POST /chat/sessions` - Create chat session
 - `POST /chat/messages` - Send message to AI
 
-## Database Models
+### Diabetic Complications (Retinopathy / Nephropathy / Neuropathy)
+- `POST /patients` — register authenticated user as a complications patient
+- `POST /patients/{id}/visits` — add or update a lab visit (keyed by `visit_date`)
+- `POST /patients/{id}/visits/upload` — CSV upload parsed into visit fields
+- `GET /patients/{id}/visits` — list visits oldest → newest
+- `GET /patients/{id}/predictions` — run `inference.predict_patient` on visit history
+
+Onboarding (`POST /onboarding/health-features`) automatically creates **Visit #1** with `visit_date = signup date` and stores complication predictions on the dashboard risk summary.
+
+**ML environment:** use Python 3.12 and the pinned versions in `requirements.txt` (`numpy`, `scikit-learn`, `xgboost`, `torch`, `joblib`). Artifacts live in `ml/complications/ml_models/artifacts/`. CPU PyTorch: `pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu`.
+
+**Clinical note:** Nephropathy decision thresholds in `thresholds.json` are extremely high (~1.0). Treat nephropathy `risk_level` labels as preliminary until validated on your cohort before any clinical use.
+
+### Diabetes Stage & Risk Score (Logistic Regression)
+- `POST /predict/stage` — run staging inference on a flat feature payload (auth required)
+- `GET /users/me/risk-summary` — latest stored prediction for the dashboard card
+- `POST /users/me/rerun-prediction` — re-run staging + complications on current profile
+
+Onboarding (`POST /onboarding/health-features`) runs the LR model automatically. Artifacts live in `ml/staging/artifacts/` (`lr_clf_{clinical|lifestyle}.pkl`, ridge regressors, metadata JSON). Set `DIABETES_LR_MODELS_DIR` to override the artifact path.
+
+**Modes:** `clinical` when lab data is complete; `lifestyle` for partial onboarding (missing labs imputed from training medians).
+
 
 ### User
 - Personal information, contact details, medical info

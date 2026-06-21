@@ -10,3 +10,13 @@ ${workspaceFolder}/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python virtual environments (never commit)
+**/.venv/
+**/.venv-*/
+**/venv/
+**/.venv_macos/
+**/venv_macos/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/

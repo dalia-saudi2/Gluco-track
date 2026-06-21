@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 
 from onboarding_validation import (
@@ -8,6 +8,7 @@ from onboarding_validation import (
     validate_degree,
     validate_major,
     coerce_date_of_birth,
+    parse_visit_date,
 )
 
 # Enums
@@ -41,6 +42,8 @@ class UserBase(BaseModel):
     address: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[int] = None
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
     ethnicity: Optional[str] = None
     education_level: Optional[str] = None
     education_major: Optional[str] = None
@@ -109,6 +112,45 @@ class UserCreate(UserBase):
             return normalized
         return value
 
+    @field_validator("age")
+    @classmethod
+    def validate_signup_age(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            raise ValueError("Age is required")
+        if value < 18 or value > 100:
+            raise ValueError("Age must be between 18 and 100")
+        return value
+
+    @field_validator("gender", mode="before")
+    @classmethod
+    def validate_signup_gender(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("Gender is required")
+        g = str(value).strip().lower()
+        if g.startswith("f"):
+            return "female"
+        if g.startswith("m"):
+            return "male"
+        raise ValueError("Gender must be male or female")
+
+    @field_validator("height_cm")
+    @classmethod
+    def validate_signup_height(cls, value: Optional[float]) -> float:
+        if value is None:
+            raise ValueError("Height is required")
+        if value < 100 or value > 250:
+            raise ValueError("Height must be between 100 and 250 cm")
+        return float(value)
+
+    @field_validator("weight_kg")
+    @classmethod
+    def validate_signup_weight(cls, value: Optional[float]) -> float:
+        if value is None:
+            raise ValueError("Weight is required")
+        if value < 30 or value > 250:
+            raise ValueError("Weight must be between 30 and 250 kg")
+        return float(value)
+
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
@@ -118,6 +160,8 @@ class UserUpdate(BaseModel):
     address: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[int] = None
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
     ethnicity: Optional[str] = None
     education_level: Optional[str] = None
     education_major: Optional[str] = None
@@ -178,6 +222,17 @@ class OnboardingLabChoiceUpdate(BaseModel):
 
 class DiabeticPathUpdate(BaseModel):
     is_diabetic_path: bool
+
+
+class ClinicalProfileResponse(BaseModel):
+    diabetes_type: Optional[str] = None
+    year_of_diagnosis: Optional[int] = None
+    years_since_diagnosis: Optional[int] = None
+    medication_list: Optional[str] = None
+    on_insulin: Optional[bool] = None
+    on_metformin: Optional[bool] = None
+    on_statin: Optional[bool] = None
+    on_antihypertensive: Optional[bool] = None
 
 
 class ClinicalProfileUpdate(BaseModel):
@@ -358,6 +413,11 @@ class MedicationBase(BaseModel):
     critical: bool = False
     category: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("critical", mode="before")
+    @classmethod
+    def _coerce_critical_bool(cls, value):
+        return False if value is None else bool(value)
 
 class MedicationCreate(MedicationBase):
     pass
@@ -543,7 +603,66 @@ class HealthFeaturesCreate(BaseModel):
     stress_level: Optional[int] = None
     hba1c: Optional[float] = None
     hematocrit: Optional[float] = None
+    fasting_glucose: Optional[float] = None
+    glucose_postprandial: Optional[float] = None
+    insulin_level: Optional[float] = None
     source_lab_upload_id: Optional[int] = None
+    visit_date: Optional[date] = None
+    duration_years: Optional[float] = None
+    visit_gender: Optional[str] = None
+    diabetes_type: Optional[str] = None
+    medications: Optional[str] = None
+    visit_age: Optional[int] = None
+
+
+class LabVisitSubmitCreate(BaseModel):
+    """Post-onboarding lab visit — upserts by visit_date and reruns complications model."""
+    visit_date: Optional[date] = None
+    duration_years: Optional[float] = None
+    age: int
+    bmi: float
+    hba1c: Optional[float] = None
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    total_cholesterol: Optional[int] = None
+    ldl: Optional[int] = None
+    hdl: Optional[int] = None
+    triglycerides: Optional[int] = None
+    hematocrit: Optional[float] = None
+    gender: str
+    diabetes_type: str
+    hypertension: str
+    medications: Optional[str] = None
+
+    @field_validator("visit_date", mode="before")
+    @classmethod
+    def _coerce_visit_date(cls, value):
+        if value is None or value == "":
+            return None
+        return parse_visit_date(value)
+
+    @field_validator("hypertension", mode="before")
+    @classmethod
+    def _coerce_hypertension(cls, value):
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if value is None:
+            return "No"
+        return str(value).strip()
+
+    @field_validator("gender", "diabetes_type", mode="before")
+    @classmethod
+    def _require_non_empty_str(cls, value, info):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError(f"{info.field_name} is required.")
+        return str(value).strip()
+
+    @field_validator("bmi", mode="before")
+    @classmethod
+    def _coerce_bmi(cls, value):
+        if value is None or value == "":
+            raise ValueError("bmi is required.")
+        return float(value)
 
 
 class CompleteLabDataCreate(BaseModel):
@@ -555,6 +674,7 @@ class CompleteLabDataCreate(BaseModel):
     hdl_cholesterol: Optional[int] = None
     triglycerides: Optional[int] = None
     source_lab_upload_id: Optional[int] = None
+    visit_date: Optional[date] = None
 
 
 class DiabetesPredictionResponse(BaseModel):
@@ -600,6 +720,78 @@ class RiskSummary(BaseModel):
     profile_completeness_pct: int
     feature_pills: dict
     account_age_days: int = 0
+    retinopathy_risk: Optional[float] = None
+    nephropathy_risk: Optional[float] = None
+    neuropathy_risk: Optional[float] = None
+    retinopathy_risk_level: Optional[str] = None
+    nephropathy_risk_level: Optional[str] = None
+    neuropathy_risk_level: Optional[str] = None
+    predicted_at: Optional[str] = None
+    risk_score_confidence: Optional[float] = None
+    staging_confidence: Optional[float] = None
+    model_name: Optional[str] = None
+    complication_model: Optional[str] = None
+    complication_confidence: Optional[str] = None
+
+
+class ComplicationPatientResponse(BaseModel):
+    id: int
+    name: str
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+
+
+class ComplicationVisitCreate(BaseModel):
+    visit_date: Optional[date] = None
+    duration_years: Optional[float] = None
+    age: int
+    bmi: float
+    hba1c: Optional[float] = None
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    total_cholesterol: Optional[int] = None
+    ldl: Optional[int] = None
+    hdl: Optional[int] = None
+    triglycerides: Optional[int] = None
+    hematocrit: Optional[float] = None
+    gender: str
+    diabetes_type: str
+    hypertension: str
+    medications: Optional[str] = None
+
+
+class ComplicationVisitResponse(BaseModel):
+    id: int
+    patient_id: int
+    visit_date: str
+    source: str
+    duration_years: Optional[float] = None
+    age: Optional[float] = None
+    bmi: Optional[float] = None
+    hba1c: Optional[float] = None
+    systolic_bp: Optional[float] = None
+    diastolic_bp: Optional[float] = None
+    total_cholesterol: Optional[float] = None
+    ldl: Optional[float] = None
+    hdl: Optional[float] = None
+    triglycerides: Optional[float] = None
+    hematocrit: Optional[float] = None
+    gender: Optional[str] = None
+    diabetes_type: Optional[str] = None
+    hypertension: Optional[str] = None
+    medications: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ComplicationPredictionResponse(BaseModel):
+    meta: Optional[dict] = None
+    predictions: Optional[dict] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
 
 
 class GlucoseReadingType(str, Enum):
@@ -689,6 +881,37 @@ class GlucoseDashboardResponse(BaseModel):
     today_value: Optional[float] = None
     today_day: str
     today_status: Optional[str] = None
+
+
+class NutritionMealLogRequest(BaseModel):
+    source: str
+    meal_label: Optional[str] = None
+    calories: float = 0
+    carbs_g: float = 0
+    protein_g: float = 0
+    fat_g: float = 0
+    foods_json: Optional[list] = None
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str) -> str:
+        if v not in ("photo", "usda", "manual"):
+            raise ValueError("source must be photo, usda, or manual")
+        return v
+
+
+class NutritionTodayResponse(BaseModel):
+    intake_date: str
+    calories_total: float
+    calories_goal: float
+    carbs_g_total: float
+    carbs_g_goal: float
+    protein_g_total: float
+    protein_g_goal: float
+    fat_g_total: float
+    fat_g_goal: float
+    meal_count: int
+    last_logged_at: Optional[str] = None
 
 
 class WaterIntakeAddRequest(BaseModel):

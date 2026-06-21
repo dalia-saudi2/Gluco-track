@@ -29,4 +29,24 @@ def get_db():
 # Create all tables
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    _ensure_sqlite_columns()
 
+
+def _ensure_sqlite_columns():
+    """Lightweight SQLite patches for columns added after initial deploy."""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(predictions)").fetchall()
+        cols = {r[1] for r in rows}
+        if "complication_result" not in cols:
+            conn.exec_driver_sql("ALTER TABLE predictions ADD COLUMN complication_result JSON")
+            conn.commit()
+        user_rows = conn.exec_driver_sql("PRAGMA table_info(users)").fetchall()
+        user_cols = {r[1] for r in user_rows}
+        if "height_cm" not in user_cols:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN height_cm FLOAT")
+            conn.commit()
+        if "weight_kg" not in user_cols:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN weight_kg FLOAT")
+            conn.commit()

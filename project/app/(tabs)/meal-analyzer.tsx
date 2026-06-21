@@ -36,6 +36,7 @@ import {
   mediaTypeFromMime,
   normalizeBase64,
 } from '../../services/mealAnalyzerService';
+import { nutritionService } from '../../services/nutritionService';
 
 const LOADING_MESSAGES = [
   'Validating carbs…',
@@ -79,7 +80,14 @@ type CartLine = {
   description: string;
   grams: string;
   carbs_per_100g: number | null;
+  energy_kcal_per_100g: number | null;
 };
+
+function estimateManualMealCalories(carbs_g: number, usdaCalories: number): number {
+  if (usdaCalories > 0) return Math.round(usdaCalories);
+  // Carb-only entry: assume carbs supply ~50% of energy in a typical mixed meal.
+  return Math.round((carbs_g * 4) / 0.5);
+}
 
 export default function MealAnalyzerScreen() {
   const { user, isAuthenticated, isLoading: authIsLoading } = useAuth();
@@ -145,6 +153,16 @@ export default function MealAnalyzerScreen() {
     }, 0);
   }, [cart]);
 
+  const derivedCalories = useMemo(() => {
+    return cart.reduce((sum, line) => {
+      const grams = parseFloat(line.grams);
+      const g = Number.isFinite(grams) ? grams : 0;
+      const kcal100 = line.energy_kcal_per_100g;
+      if (kcal100 == null || !Number.isFinite(kcal100)) return sum;
+      return sum + (g * kcal100) / 100;
+    }, 0);
+  }, [cart]);
+
   useEffect(() => {
     if (skipDerivedCarbsSync.current) {
       skipDerivedCarbsSync.current = false;
@@ -195,6 +213,7 @@ export default function MealAnalyzerScreen() {
         description: (det.description || hit.description).slice(0, 200),
         grams: '100',
         carbs_per_100g: det.carbs_g_per_100g,
+        energy_kcal_per_100g: det.energy_kcal_per_100g,
       };
       setCart((prev) => [...prev, line]);
     } catch (e: unknown) {
@@ -213,7 +232,7 @@ export default function MealAnalyzerScreen() {
         return;
       }
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: false,
         quality: 0.85,
         base64: true,
@@ -325,6 +344,21 @@ export default function MealAnalyzerScreen() {
         usda_derived_carbs_g: usdaRef,
       });
       setPrediction(out);
+
+      if (user?.id) {
+        const n = vision.parsed?.nutrition;
+        nutritionService
+          .logMeal(user.id, {
+            source: 'photo',
+            meal_label: MEAL_LABELS[mealKey],
+            calories: Number(n?.calories) || 0,
+            carbs_g: carbs,
+            protein_g: Number(n?.protein) || 0,
+            fat_g: Number(n?.fat) || 0,
+            foods_json: vision.parsed?.foods,
+          })
+          .catch((err) => console.warn('Nutrition log failed:', err));
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Photo prediction failed.';
       setError(msg);
@@ -362,6 +396,19 @@ export default function MealAnalyzerScreen() {
         usda_derived_carbs_g: derivedCarbs > 0 ? derivedCarbs : undefined,
       });
       setPrediction(out);
+
+      if (user?.id) {
+        nutritionService
+          .logMeal(user.id, {
+            source: derivedCarbs > 0 ? 'usda' : 'manual',
+            meal_label: MEAL_LABELS[mealKey],
+            calories: estimateManualMealCalories(carbs_g, derivedCalories),
+            carbs_g,
+            protein_g: 0,
+            fat_g: 0,
+          })
+          .catch((err) => console.warn('Nutrition log failed:', err));
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Prediction failed.';
       setError(msg);

@@ -42,7 +42,9 @@ export function HealthDashboard() {
     refreshing,
     error,
     refreshData,
-    isSimulated
+    isSimulated,
+    isServerBacked,
+    lastSyncedAt,
   } = useHealth(status, { patientId: user?.id, isAuthenticated: Boolean(user) });
 
   // Active Goals
@@ -83,6 +85,8 @@ export function HealthDashboard() {
         {/* Banner notification for simulation mode */}
         <HealthPermissionBanner
           isSimulated={isSimulated}
+          isServerBacked={isServerBacked}
+          lastSyncedAt={lastSyncedAt}
           onRequestPermissions={() => {
             healthService.setSimulationMode(false);
             checkStatus();

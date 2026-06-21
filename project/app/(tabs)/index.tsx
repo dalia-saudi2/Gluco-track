@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLogoutAndRedirect } from '../../hooks/useLogoutAndRedirect';
@@ -13,16 +13,17 @@ import { useHealth } from '../../hooks/useHealth';
 import { useNavigateToLabUpload } from '../../hooks/useNavigateToLabUpload';
 import type { GlucoseDayPoint } from '../../components/dashboard/GlucoseTrendChart';
 import type { GlucoseReadingType } from '../../types/glucoseReading';
+import type { RiskSummary } from '../../types/riskSummary';
+import type { NutritionToday } from '../../types/nutritionToday';
+import { isClinicalProfileComplete } from '../../utils/authRouting';
+import { apiClient } from '../../config/api';
+import { nutritionService } from '../../services/nutritionService';
+import { useMedicationReminderOptional } from '../../contexts/MedicationReminderContext';
+import { buildMedicationDashboardRows, type SchedulableMedication } from '../../utils/medicationSchedule';
 
-function mapMedStatus(index: number, isOverdue?: boolean): 'taken' | 'missed' | 'upcoming' | 'later' {
-  if (index === 0) return 'taken';
-  if (isOverdue) return 'missed';
-  if (index === 2) return 'upcoming';
-  return 'later';
-}
 
 export default function DashboardScreen() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, getOnboardingProgressForRouting, refreshOnboardingProgress } = useAuth();
   const handleLogout = useLogoutAndRedirect();
   const [loading, setLoading] = useState(true);
   const [props, setProps] = useState<Partial<VitalisDashboardProps>>({});
@@ -31,10 +32,51 @@ export default function DashboardScreen() {
   const [glucoseTodayStatus, setGlucoseTodayStatus] = useState<string | null>(null);
   const [glucoseSheetOpen, setGlucoseSheetOpen] = useState(false);
   const [glucoseHistoryOpen, setGlucoseHistoryOpen] = useState(false);
+  const [riskSummary, setRiskSummary] = useState<RiskSummary | null>(null);
+  const [predictionRunning, setPredictionRunning] = useState(false);
+  const [nutritionToday, setNutritionToday] = useState<NutritionToday | null>(null);
 
   const { status } = useHealthPermissions();
   const { today } = useHealth(status, { patientId: user?.id, isAuthenticated });
   const navigateToLabUpload = useNavigateToLabUpload();
+  const medicationReminder = useMedicationReminderOptional();
+  const medicationReminderRef = useRef(medicationReminder);
+  medicationReminderRef.current = medicationReminder;
+  const hasLoadedDashboardRef = useRef(false);
+  const [backendMedications, setBackendMedications] = useState<SchedulableMedication[]>([]);
+
+  const loadRiskSummary = useCallback(async () => {
+    try {
+      const summary = (await apiClient.getRiskSummary()) as RiskSummary;
+      setRiskSummary(summary);
+    } catch {
+      setRiskSummary(null);
+    }
+  }, []);
+
+  const handleRunPrediction = useCallback(async () => {
+    try {
+      setPredictionRunning(true);
+      const summary = (await apiClient.rerunPrediction()) as RiskSummary;
+      setRiskSummary(summary);
+      showToast.success('Prediction updated', 'Your diabetes risk model has been refreshed.');
+    } catch (e) {
+      console.warn('Rerun prediction error:', e);
+      showToast.error('Prediction failed', 'Could not run a new prediction. Try again later.');
+    } finally {
+      setPredictionRunning(false);
+    }
+  }, []);
+
+  const loadNutritionToday = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const data = await nutritionService.getToday(user.id);
+      setNutritionToday(data);
+    } catch {
+      setNutritionToday(null);
+    }
+  }, [user?.id]);
 
   const loadGlucose = useCallback(async () => {
     if (!user?.id) return;
@@ -53,28 +95,14 @@ export default function DashboardScreen() {
     }
   }, [user?.id]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!isAuthenticated) {
-        setLoading(false);
-        return;
-      }
-      loadDashboard();
-    }, [isAuthenticated, user?.id])
-  );
-
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     try {
-      if (!props.medications) setLoading(true);
+      if (!hasLoadedDashboardRef.current) setLoading(true);
       const data = await dashboardService.getDashboardData();
-      await loadGlucose();
-
-      const medications = (data.medications ?? []).slice(0, 4).map((med, i) => ({
-        name: med.name,
-        time: med.nextDose?.includes('Overdue') ? '7:30 AM' : med.nextDose || '8:00 AM',
-        note: med.frequency || 'Daily',
-        status: mapMedStatus(i, med.isOverdue),
-      }));
+      await Promise.all([loadGlucose(), loadRiskSummary(), loadNutritionToday()]);
+      const backendMeds = (data.rawData?.current_medications ?? []) as SchedulableMedication[];
+      setBackendMedications(backendMeds);
+      await medicationReminderRef.current?.syncMedications(backendMeds);
 
       const appt = data.appointments?.[0];
       let nextAppointment: VitalisDashboardProps['nextAppointment'] = null;
@@ -104,17 +132,34 @@ export default function DashboardScreen() {
       setProps({
         userName: user?.full_name || data.user?.full_name || 'Patient',
         bloodPressure: data.healthMetrics?.blood_pressure || '128/82',
-        bmi: data.healthMetrics?.bmi || '28.4',
-        medications: medications.length ? medications : undefined,
+        bmi: data.healthMetrics?.bmi || data.user?.bmi || undefined,
+        weightKg: data.healthMetrics?.weight_kg ?? data.user?.weight_kg ?? null,
+        bmiGroup: data.healthMetrics?.bmi_group ?? null,
+        hba1c: data.healthMetrics?.hba1c ?? null,
+        hba1cMeasuredAt: data.healthMetrics?.hba1c_measured_at ?? null,
         nextAppointment,
         labResults: labResults.length ? labResults : undefined,
       });
     } catch (e) {
       console.warn('Dashboard load error:', e);
     } finally {
+      hasLoadedDashboardRef.current = true;
       setLoading(false);
     }
-  };
+  }, [loadGlucose, loadRiskSummary, loadNutritionToday, user?.full_name]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated) {
+        hasLoadedDashboardRef.current = false;
+        setLoading(false);
+        return;
+      }
+      void refreshOnboardingProgress();
+      void medicationReminderRef.current?.refresh();
+      void loadDashboard();
+    }, [isAuthenticated, refreshOnboardingProgress, loadDashboard])
+  );
 
   const handleSaveGlucose = async (payload: {
     value_mgdl: number;
@@ -128,6 +173,17 @@ export default function DashboardScreen() {
     await loadGlucose();
   };
 
+  const liveMedications = useMemo(() => {
+    if (!backendMedications.length) {
+      return medicationReminder?.dashboardRows?.length ? medicationReminder.dashboardRows : undefined;
+    }
+    const rows = buildMedicationDashboardRows(
+      backendMedications,
+      medicationReminder?.takenDoseIds ?? new Set()
+    );
+    return rows.length ? rows : undefined;
+  }, [backendMedications, medicationReminder?.takenDoseIds, medicationReminder?.dashboardRows]);
+
   return (
     <>
       <VitalisDashboard
@@ -135,7 +191,11 @@ export default function DashboardScreen() {
         loading={loading && isAuthenticated}
         bloodPressure={props.bloodPressure}
         bmi={props.bmi}
-        medications={props.medications}
+        weightKg={props.weightKg}
+        bmiGroup={props.bmiGroup}
+        hba1c={props.hba1c}
+        hba1cMeasuredAt={props.hba1cMeasuredAt}
+        medications={liveMedications}
         nextAppointment={props.nextAppointment}
         labResults={props.labResults}
         onLogout={handleLogout}
@@ -151,6 +211,14 @@ export default function DashboardScreen() {
         onUploadLab={navigateToLabUpload}
         quickContacts={user?.quick_contacts ?? null}
         isAuthenticated={isAuthenticated}
+        riskSummary={riskSummary}
+        onRunPrediction={handleRunPrediction}
+        predictionRunning={predictionRunning}
+        nutritionToday={nutritionToday}
+        clinicalProfileIncomplete={!isClinicalProfileComplete(getOnboardingProgressForRouting())}
+        onMarkMedicationTaken={(slotKey) => {
+          void medicationReminder?.markTakenBySlotKey(slotKey);
+        }}
       />
       <GlucoseHistoryModal
         visible={glucoseHistoryOpen}

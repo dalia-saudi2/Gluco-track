@@ -6,10 +6,24 @@ import { useD, useDashboardStyles } from '../../hooks/useDashboardTheme';
 
 type Props = {
   isSimulated: boolean;
+  isServerBacked?: boolean;
+  lastSyncedAt?: string | null;
   onRequestPermissions: () => void;
 };
 
-export function HealthPermissionBanner({ isSimulated, onRequestPermissions }: Props) {
+function formatSyncedAt(value?: string | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
+export function HealthPermissionBanner({
+  isSimulated,
+  isServerBacked = false,
+  lastSyncedAt,
+  onRequestPermissions,
+}: Props) {
   const D = useD();
   const styles = useDashboardStyles(createStyles);
 
@@ -20,20 +34,28 @@ export function HealthPermissionBanner({ isSimulated, onRequestPermissions }: Pr
       <View style={styles.left}>
         <Info size={16} color={D.primary} style={styles.icon} />
         <View style={styles.textWrap}>
-          <Text style={styles.title}>Running in Simulation Mode</Text>
+          <Text style={styles.title}>
+            {isServerBacked ? 'Synced account data' : 'Running in Simulation Mode'}
+          </Text>
           <Text style={styles.description}>
-            {Platform.OS === 'android'
-              ? 'Install the native app and connect Health Connect for real step, sleep, and calorie data.'
-              : 'This environment does not support native Health APIs. Data is simulated locally.'}
+            {isServerBacked
+              ? `Showing your saved steps, sleep, and calories from the server.${
+                  formatSyncedAt(lastSyncedAt) ? ` Last sync: ${formatSyncedAt(lastSyncedAt)}.` : ''
+                }`
+              : Platform.OS === 'android'
+                ? 'Install the native app and connect Health Connect for live device data.'
+                : 'This browser cannot read HealthKit or Health Connect. Sign in on mobile to sync live data.'}
           </Text>
         </View>
       </View>
-      <Pressable style={styles.btn} onPress={onRequestPermissions}>
-        <Text style={styles.btnText}>
-          {Platform.OS === 'android' ? 'Connect Health Connect' : 'Connect Health Kit'}
-        </Text>
-        <ArrowRight size={12} color={D.primary} />
-      </Pressable>
+      {!isServerBacked ? (
+        <Pressable style={styles.btn} onPress={onRequestPermissions}>
+          <Text style={styles.btnText}>
+            {Platform.OS === 'android' ? 'Connect Health Connect' : 'Connect Health Kit'}
+          </Text>
+          <ArrowRight size={12} color={D.primary} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }

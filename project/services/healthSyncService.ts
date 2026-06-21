@@ -109,6 +109,27 @@ function serverHistoryToClient(data: {
   };
 }
 
+function normalizeHistoryRange(days: number, data: HealthHistoryData): HealthHistoryData {
+  const stepsMap = new Map(data.steps.map((p) => [p.date, p.value]));
+  const sleepMap = new Map(data.sleep.map((p) => [p.date, p.value]));
+  const caloriesMap = new Map(data.calories.map((p) => [p.date, p.value]));
+  const steps: HealthHistoryData['steps'] = [];
+  const sleep: HealthHistoryData['sleep'] = [];
+  const calories: HealthHistoryData['calories'] = [];
+
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    steps.push({ date: dateStr, value: stepsMap.get(dateStr) ?? 0 });
+    sleep.push({ date: dateStr, value: sleepMap.get(dateStr) ?? 0 });
+    calories.push({ date: dateStr, value: caloriesMap.get(dateStr) ?? 0 });
+  }
+
+  return { steps, sleep, calories };
+}
+
 function mergeHistory(device: HealthHistoryData, server: HealthHistoryData): HealthHistoryData {
   const mergeMetric = (
     devicePoints: { date: string; value: number }[],
@@ -202,9 +223,26 @@ class HealthSyncService {
     }
   }
 
+  async fetchToday(
+    patientId: number
+  ): Promise<HealthTodayData & { synced_at?: string | null }> {
+    const data = (await apiClient.getHealthActivityToday(patientId)) as {
+      steps?: number;
+      sleep_hours?: number;
+      calories_burned?: number;
+      synced_at?: string | null;
+    };
+    return {
+      steps: Math.round(data.steps ?? 0),
+      sleepHours: Number(data.sleep_hours ?? 0),
+      caloriesBurned: Math.round(data.calories_burned ?? 0),
+      synced_at: data.synced_at ?? null,
+    };
+  }
+
   async fetchHistory(patientId: number, days: 7 | 30): Promise<HealthHistoryData> {
     const data = await apiClient.getHealthActivityHistory(patientId, days);
-    return serverHistoryToClient(data);
+    return normalizeHistoryRange(days, serverHistoryToClient(data));
   }
 
   async fetchSummaries(patientId: number): Promise<{

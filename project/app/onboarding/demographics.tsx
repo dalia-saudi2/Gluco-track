@@ -315,7 +315,8 @@ export default function DemographicsOnboardingScreen() {
       await refreshUser();
       showToast.success('Profile saved', 'Next: tell us about your diabetes path.');
       const user = await authService.getCurrentUser();
-      const next = await resolveOnboardingRoute(user);
+      const progress = await apiClient.getOnboardingProgress();
+      const next = await resolveOnboardingRoute(user, progress);
       replaceOnboardingStep(router, next);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save demographics.';

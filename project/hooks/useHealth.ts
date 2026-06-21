@@ -84,37 +84,62 @@ export function useHealth(permissionStatus: HealthPermissionStatus, options: Opt
       setError(null);
 
       try {
-        const [todayData, device7d, device30d] = await Promise.all([
-          healthService.getTodayData(),
-          healthService.getHistoryData(7),
-          healthService.getHistoryData(30),
-        ]);
+        const simulated = healthService.isSimulated();
 
-        let merged7d = device7d;
-        let merged30d = device30d;
+        if (simulated && patientId && isAuthenticated) {
+          const [todayData, server7d, server30d] = await Promise.all([
+            healthSyncService.fetchToday(patientId),
+            healthSyncService.fetchHistory(patientId, 7),
+            healthSyncService.fetchHistory(patientId, 30),
+          ]);
 
-        if (patientId && isAuthenticated) {
-          try {
-            const [server7d, server30d] = await Promise.all([
-              healthSyncService.fetchHistory(patientId, 7),
-              healthSyncService.fetchHistory(patientId, 30),
-            ]);
-            merged7d = healthSyncService.mergeDeviceWithServer(device7d, server7d);
-            merged30d = healthSyncService.mergeDeviceWithServer(device30d, server30d);
-          } catch (serverErr) {
-            console.warn('Could not load server health history:', serverErr);
+          setToday({
+            steps: todayData.steps,
+            sleepHours: todayData.sleepHours,
+            caloriesBurned: todayData.caloriesBurned,
+          });
+          setHistory7d(server7d);
+          setHistory30d(server30d);
+
+          if (todayData.synced_at) {
+            setLastSyncedAt(todayData.synced_at);
+          } else {
+            const stored = await healthSyncService.getLastSyncedAt();
+            setLastSyncedAt(stored);
           }
-        }
-
-        setToday(todayData);
-        setHistory7d(merged7d);
-        setHistory30d(merged30d);
-
-        if (patientId && isAuthenticated) {
-          await syncToBackend(todayData, merged7d, merged30d);
         } else {
-          const stored = await healthSyncService.getLastSyncedAt();
-          setLastSyncedAt(stored);
+          const [todayData, device7d, device30d] = await Promise.all([
+            healthService.getTodayData(),
+            healthService.getHistoryData(7),
+            healthService.getHistoryData(30),
+          ]);
+
+          let merged7d = device7d;
+          let merged30d = device30d;
+
+          if (patientId && isAuthenticated) {
+            try {
+              const [server7d, server30d] = await Promise.all([
+                healthSyncService.fetchHistory(patientId, 7),
+                healthSyncService.fetchHistory(patientId, 30),
+              ]);
+              merged7d = healthSyncService.mergeDeviceWithServer(device7d, server7d);
+              merged30d = healthSyncService.mergeDeviceWithServer(device30d, server30d);
+            } catch (serverErr) {
+              console.warn('Could not load server health history:', serverErr);
+            }
+          }
+
+          setToday(todayData);
+          setHistory7d(merged7d);
+          setHistory30d(merged30d);
+
+          if (patientId && isAuthenticated && !simulated) {
+            await syncToBackend(todayData, merged7d, merged30d);
+          } else {
+            const stored = await healthSyncService.getLastSyncedAt();
+            setLastSyncedAt(stored);
+          }
         }
       } catch (e: unknown) {
         console.warn('Error fetching health data in hook:', e);
@@ -167,5 +192,7 @@ export function useHealth(permissionStatus: HealthPermissionStatus, options: Opt
     lastSyncedAt,
     refreshData: () => fetchData(true),
     isSimulated: healthService.isSimulated(),
+    isServerBacked:
+      healthService.isSimulated() && Boolean(patientId && isAuthenticated),
   };
 }

@@ -1,6 +1,6 @@
 import type { Router } from 'expo-router';
 import { apiClient } from '../config/api';
-import { setLabUploadReturnTo } from './labUploadReturn';
+import { clearLabUploadReturnTo, setLabUploadReturnTo } from './labUploadReturn';
 import { authService } from '../services/authService';
 /** Opens the lab OCR flow (upload → review). Pass returnTo when opened from tabs/profile. */
 export async function navigateToLabUpload(
@@ -28,6 +28,8 @@ export async function navigateToLabUpload(
 
   // During onboarding only — must not run when user opened upload from dashboard/profile.
   if (!returnTo) {
+    // Drop any stale tab/profile return route from a prior interrupted flow.
+    clearLabUploadReturnTo();
     try {
       await apiClient.updateOnboardingLabChoice(true);
       if (refreshUser) await refreshUser();

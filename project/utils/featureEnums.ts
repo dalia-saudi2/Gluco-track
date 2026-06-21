@@ -19,6 +19,11 @@ export const DIABETES_TYPE_OPTIONS = [
   { label: 'Not sure', value: 'unknown' },
 ] as const;
 
+export const GENDER_OPTIONS = [
+  { label: 'Male', value: 'male' },
+  { label: 'Female', value: 'female' },
+] as const;
+
 export const INSULIN_REGIMEN_OPTIONS = [
   { label: 'Basal only', value: 'basal' },
   { label: 'Basal-Bolus', value: 'basal_bolus' },

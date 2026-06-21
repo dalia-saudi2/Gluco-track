@@ -1,5 +1,6 @@
 """Validation helpers for onboarding demographics."""
 
+from contextlib import suppress
 from datetime import date, datetime
 from typing import Optional, Union
 
@@ -173,10 +174,11 @@ def coerce_date_of_birth(value: Optional[Union[datetime, date, str]]) -> Optiona
         text = value.strip()
         if not text:
             return None
-        if len(text) == 10:
-            parsed = datetime.strptime(text, '%Y-%m-%d')
-        else:
-            parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+        parsed = (
+            datetime.strptime(text, '%Y-%m-%d')
+            if len(text) == 10
+            else datetime.fromisoformat(text.replace('Z', '+00:00'))
+        )
     else:
         return value  # type: ignore[return-value]
 
@@ -225,3 +227,31 @@ def validate_major(major: Optional[str], degree: Optional[str]) -> None:
     allowed = majors_for_degree(degree)
     if trimmed not in allowed:
         raise ValueError("Invalid major for the selected education level.")
+
+
+def parse_visit_date(value: Union[str, date, datetime, None]) -> Optional[date]:
+    """Accept YYYY-MM-DD or DD-MM-YYYY / DD/MM/YYYY for lab visit forms."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    if "-" in s[:10]:
+        parts = s.split("-", 2)
+        if len(parts) == 3 and len(parts[0]) == 4:
+            with suppress(ValueError):
+                year, month, day = int(parts[0]), int(parts[1]), int(parts[2][:2])
+                return date(year, month, day)
+    for sep in ("-", "/"):
+        parts = s.split(sep)
+        if len(parts) == 3 and len(parts[2]) == 4 and len(parts[0]) <= 2:
+            try:
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                return date(year, month, day)
+            except ValueError:
+                pass
+    raise ValueError("Enter visit date as YYYY-MM-DD (e.g. 2026-06-21).")

@@ -60,3 +60,16 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# ML model binaries (too large for GitHub — train locally or download separately)
+ml/**/artifacts/*.pt
+ml/**/artifacts/*.pkl
+ml/**/artifacts/*.pth
+ml/**/artifacts/*.onnx
+ml/**/artifacts/*.h5
+ml/**/artifacts/*.joblib
+ml/**/artifacts/*.safetensors
+ml/**/artifacts/*.bin
+
+# Large training datasets (generate locally — see ml/ohio_t1dm_to_csv.py)
+ml/data/*.csv

@@ -37,13 +37,17 @@ export function peekTabsReturnAfterFlowExit(): boolean {
   return allowTabsDespiteOnboarding;
 }
 
-export function clearTabsReturnAfterFlowExit() {
-  allowTabsDespiteOnboarding = false;
-}
-
 function isTabsRoute(route: string): boolean {
   const normalized = normalizeAppReturnRoute(route);
   return normalized === '/(tabs)' || normalized.startsWith('/(tabs)/');
+}
+
+/** Clear tab-bypass flag and any stale onboarding/profile return routes. */
+export function clearTabsReturnAfterFlowExit() {
+  allowTabsDespiteOnboarding = false;
+  if (returnRoute && !isTabsRoute(returnRoute)) {
+    returnRoute = null;
+  }
 }
 
 /** Leave lab upload/review and return to the screen that opened the flow, if any. */

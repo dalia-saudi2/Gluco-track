@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { CandyCard } from '../dashboard/CandyCard';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
@@ -62,27 +62,6 @@ export default function ClinicalGlucosePanel({
 
   if (!prediction) return null;
 
-  const dirLabel =
-    prediction.direction === 'likely_up'
-      ? 'Likely increase'
-      : prediction.direction === 'likely_down'
-        ? 'Likely decrease'
-        : 'Uncertain';
-
-  const dirLabelAr =
-    prediction.direction === 'likely_up'
-      ? 'السكر مرجّح يزيد (↑)'
-      : prediction.direction === 'likely_down'
-        ? 'السكر مرجّح يقل (↓)'
-        : 'غير مؤكد — راجع القيم أو أعد المحاولة';
-
-  const dirColor =
-    prediction.direction === 'likely_up'
-      ? D.orange
-      : prediction.direction === 'likely_down'
-        ? D.green
-        : D.onSurfaceVariant;
-
   return (
     <View style={styles.stack}>
       {photoInsight ? (
@@ -145,14 +124,7 @@ export default function ClinicalGlucosePanel({
           <Text style={styles.rejectTitle}>Prediction withheld</Text>
           <Text style={styles.rejectBody}>{prediction.rejection_reason || 'Validation failed.'}</Text>
         </CandyCard>
-      ) : (
-        <CandyCard style={[styles.directionCard, { borderLeftColor: dirColor }]} accent="primary">
-          <Text style={styles.directionLabel}>Model direction</Text>
-          <Text style={[styles.directionValue, { color: dirColor }]}>{dirLabel}</Text>
-          <Text style={styles.directionAr}>{dirLabelAr}</Text>
-          <Text style={styles.probText}>P(up) ≈ {(prediction.probability_up * 100).toFixed(1)}%</Text>
-        </CandyCard>
-      )}
+      ) : null}
 
       <CandyCard style={styles.card}>
         <Text style={styles.sectionTitle}>Validated inputs</Text>
@@ -213,21 +185,6 @@ function createStyles(D: DashboardPalette) {
     errorTitle: { fontFamily: DF.bold, fontSize: 16, color: D.onSurface, marginBottom: 6 },
     errorBody: { fontFamily: DF.medium, fontSize: 14, color: D.onSurfaceVariant },
     stack: { gap: 14 },
-    directionCard: {
-      padding: 16,
-      borderLeftWidth: 4,
-    },
-    directionLabel: { fontFamily: DF.bold, fontSize: 10, color: D.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 1 },
-    directionValue: { fontFamily: DF.bold, fontSize: 22, marginTop: 4 },
-    directionAr: {
-      fontFamily: DF.bold,
-      fontSize: 15,
-      color: D.onSurfaceVariant,
-      marginTop: 6,
-      writingDirection: 'rtl' as const,
-      alignSelf: 'flex-start' as const,
-    },
-    probText: { fontFamily: DF.medium, fontSize: 13, color: D.onSurfaceVariant, marginTop: 6 },
     rejectCard: { padding: 16 },
     rejectTitle: { fontFamily: DF.bold, fontSize: 16, color: D.onSurface },
     rejectBody: { fontFamily: DF.medium, fontSize: 14, color: D.onSurfaceVariant, marginTop: 8 },

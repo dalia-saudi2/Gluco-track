@@ -66,15 +66,7 @@ export function buildOnboardingSteps(
   user: User | null,
   progress?: OnboardingProgress | null
 ): OnboardingStepSlug[] {
-  const steps: OnboardingStepSlug[] = ['demographics', 'diabetic-path'];
-
-  const includeClinical =
-    user?.is_diabetic_path === true || progress?.clinical_profile_done === true;
-  if (includeClinical) {
-    steps.push('clinical-profile');
-  }
-
-  steps.push('lab-choice');
+  const steps: OnboardingStepSlug[] = ['demographics', 'diabetic-path', 'lab-choice'];
 
   const labOptIn = progress?.lab_opt_in ?? user?.onboarding_lab_opt_in ?? null;
   if (labOptIn === true) {

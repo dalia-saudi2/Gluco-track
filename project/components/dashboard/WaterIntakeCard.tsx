@@ -15,6 +15,7 @@ type Props = {
   D: DashboardPalette;
   patientId?: number;
   onIntakeChange?: (data: WaterIntakeToday) => void;
+  compact?: boolean;
 };
 
 function formatLiters(ml: number): string {
@@ -33,8 +34,8 @@ function formatLastLogged(iso: string | null | undefined): string {
   return `Last logged ${hours}h ${mins % 60}m ago`;
 }
 
-export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
-  const s = useMemo(() => createStyles(D), [D]);
+export function WaterIntakeCard({ D, patientId, onIntakeChange, compact = false }: Props) {
+  const s = useMemo(() => createStyles(D, compact), [D, compact]);
   const [data, setData] = useState<WaterIntakeToday | null>(null);
   const [loading, setLoading] = useState(Boolean(patientId));
   const [adding, setAdding] = useState(false);
@@ -156,10 +157,10 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
       </View>
 
       <View style={s.glassGrid}>
-        {[0, 1].map((row) => (
+        {(compact ? [0] : [0, 1]).map((row) => (
           <View key={row} style={s.glassRow}>
-            {Array.from({ length: 5 }, (_, col) => {
-              const i = row * 5 + col;
+            {Array.from({ length: compact ? 4 : 5 }, (_, col) => {
+              const i = row * (compact ? 4 : 5) + col;
               const filled = i < filledGlasses;
               return (
                 <Pressable
@@ -169,7 +170,7 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
                   disabled={adding || !patientId}
                 >
                   <GlassWater
-                    size={22}
+                    size={compact ? 18 : 22}
                     color={filled ? D.tertiary : D.outlineVariant}
                     strokeWidth={filled ? 2 : 1.5}
                   />
@@ -203,10 +204,10 @@ export function WaterIntakeCard({ D, patientId, onIntakeChange }: Props) {
   );
 }
 
-function createStyles(D: DashboardPalette) {
+function createStyles(D: DashboardPalette, compact: boolean) {
   return StyleSheet.create({
-    wrap: { gap: 14 },
-    centered: { paddingVertical: 32, alignItems: 'center' },
+    wrap: { gap: compact ? 8 : 14 },
+    centered: { paddingVertical: compact ? 16 : 32, alignItems: 'center' },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -215,28 +216,28 @@ function createStyles(D: DashboardPalette) {
     headerMain: { flex: 1 },
     sectionLabel: {
       fontFamily: DF.bold,
-      fontSize: 10,
+      fontSize: compact ? 9 : 10,
       color: D.onSurfaceVariant,
-      letterSpacing: 2,
+      letterSpacing: compact ? 1.5 : 2,
       textTransform: 'uppercase',
     },
     mainValue: {
       fontFamily: DF.bold,
-      fontSize: 32,
+      fontSize: compact ? 24 : 32,
       color: D.tertiary,
-      marginTop: 4,
-      lineHeight: 36,
+      marginTop: compact ? 2 : 4,
+      lineHeight: compact ? 28 : 36,
     },
     unit: {
       fontFamily: DF.bold,
-      fontSize: 18,
+      fontSize: compact ? 14 : 18,
       color: D.tertiary,
     },
     cupsSub: {
       fontFamily: DF.medium,
-      fontSize: 11,
+      fontSize: compact ? 10 : 11,
       color: D.onSurfaceVariant,
-      marginTop: 4,
+      marginTop: compact ? 2 : 4,
     },
     confirmBtn: {
       flexDirection: 'row',
@@ -245,7 +246,7 @@ function createStyles(D: DashboardPalette) {
       gap: 8,
       backgroundColor: D.tertiary,
       borderRadius: 999,
-      paddingVertical: 12,
+      paddingVertical: compact ? 9 : 12,
       paddingHorizontal: 16,
     },
     confirmBtnPressed: { opacity: 0.9 },
@@ -257,9 +258,9 @@ function createStyles(D: DashboardPalette) {
     },
     lastLogged: {
       fontFamily: DF.medium,
-      fontSize: 11,
+      fontSize: compact ? 10 : 11,
       color: D.onSurfaceVariant,
-      paddingVertical: 8,
+      paddingVertical: compact ? 6 : 8,
       paddingHorizontal: 12,
       borderRadius: 12,
       backgroundColor: D.surfaceContainerLow,
@@ -267,13 +268,13 @@ function createStyles(D: DashboardPalette) {
       borderColor: D.outlineVariant,
     },
     reminderBox: {
-      paddingVertical: 10,
+      paddingVertical: compact ? 8 : 10,
       paddingHorizontal: 12,
       borderRadius: 12,
       backgroundColor: 'rgba(0,150,204,0.08)',
       borderWidth: 1,
       borderColor: 'rgba(0,150,204,0.2)',
-      gap: 4,
+      gap: compact ? 2 : 4,
     },
     reminderBoxDue: {
       backgroundColor: 'rgba(251,146,60,0.1)',
@@ -290,7 +291,7 @@ function createStyles(D: DashboardPalette) {
     reminderTitleDue: { color: D.orange },
     countdown: {
       fontFamily: DF.bold,
-      fontSize: 28,
+      fontSize: compact ? 22 : 28,
       color: D.tertiary,
       letterSpacing: 2,
       marginTop: 2,
@@ -298,19 +299,19 @@ function createStyles(D: DashboardPalette) {
     countdownDue: { color: D.orange },
     reminderHint: {
       fontFamily: DF.medium,
-      fontSize: 10,
+      fontSize: compact ? 9 : 10,
       color: D.onSurfaceVariant,
-      lineHeight: 14,
+      lineHeight: compact ? 12 : 14,
     },
     iconCircle: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: compact ? 34 : 40,
+      height: compact ? 34 : 40,
+      borderRadius: compact ? 17 : 20,
       backgroundColor: 'rgba(0,150,204,0.12)',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    glassGrid: { gap: 10, paddingVertical: 4 },
+    glassGrid: { gap: compact ? 6 : 10, paddingVertical: compact ? 0 : 4 },
     glassRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -346,7 +347,7 @@ function createStyles(D: DashboardPalette) {
     },
     quickBtn: {
       flex: 1,
-      paddingVertical: 10,
+      paddingVertical: compact ? 8 : 10,
       borderRadius: 999,
       backgroundColor: D.surfaceContainerLow,
       borderWidth: 1,

@@ -8,6 +8,7 @@ import { DMSans_400Regular, DMSans_500Medium, DMSans_700Bold } from '@expo-googl
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '../contexts/AuthContext';
 import { HydrationReminderProvider } from '../contexts/HydrationReminderContext';
+import { MedicationReminderProvider } from '../contexts/MedicationReminderContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { ToastProvider } from '../components/ToastProvider';
 import { ZoomOAuthHandler } from '../components/ZoomOAuthHandler';
@@ -46,13 +47,15 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <HydrationReminderProvider>
-          <ToastProvider>
-            <ZoomOAuthHandler />
-            <AuthGate>
-              <Stack screenOptions={{ headerShown: false }} />
-            </AuthGate>
-            <ThemedStatusBar />
-          </ToastProvider>
+          <MedicationReminderProvider>
+            <ToastProvider>
+              <ZoomOAuthHandler />
+              <AuthGate>
+                <Stack screenOptions={{ headerShown: false }} />
+              </AuthGate>
+              <ThemedStatusBar />
+            </ToastProvider>
+          </MedicationReminderProvider>
         </HydrationReminderProvider>
       </AuthProvider>
     </ThemeProvider>

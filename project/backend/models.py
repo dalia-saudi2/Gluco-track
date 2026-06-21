@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON, Computed, Date
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, JSON, Computed, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -27,6 +27,8 @@ class User(Base):
     address = Column(String)
     gender = Column(String)
     age = Column(Integer, nullable=True)
+    height_cm = Column(Float, nullable=True)
+    weight_kg = Column(Float, nullable=True)
     ethnicity = Column(String, nullable=True)
     education_level = Column(String, nullable=True)
     education_major = Column(String, nullable=True)
@@ -353,6 +355,36 @@ class PatientClinicalProfile(Base):
     patient = relationship("User", backref="clinical_profile", uselist=False)
 
 
+class PatientLabVisit(Base):
+    """One lab report per calendar day — feeds the complications LSTM/XGBoost models."""
+    __tablename__ = "patient_lab_visits"
+    __table_args__ = (UniqueConstraint("patient_id", "visit_date", name="uq_patient_lab_visit_date"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    visit_date = Column(Date, nullable=False, index=True)
+    source = Column(String, nullable=False, default="manual")
+    duration_years = Column(Float, nullable=True)
+    age = Column(Integer, nullable=False)
+    bmi = Column(Float, nullable=False)
+    hba1c = Column(Float, nullable=True)
+    systolic_bp = Column(Integer, nullable=True)
+    diastolic_bp = Column(Integer, nullable=True)
+    total_cholesterol = Column(Integer, nullable=True)
+    ldl = Column(Integer, nullable=True)
+    hdl = Column(Integer, nullable=True)
+    triglycerides = Column(Integer, nullable=True)
+    hematocrit = Column(Float, nullable=True)
+    gender = Column(String, nullable=False)
+    diabetes_type = Column(String, nullable=False)
+    hypertension = Column(String, nullable=False)
+    medications = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    patient = relationship("User", backref="lab_visits")
+
+
 class DiabetesPrediction(Base):
     __tablename__ = "predictions"
 
@@ -374,6 +406,7 @@ class DiabetesPrediction(Base):
     features_used = Column(Integer, nullable=True)
     features_total = Column(Integer, default=25)
     imputed_features = Column(JSON, nullable=True)
+    complication_result = Column(JSON, nullable=True)
     predicted_at = Column(DateTime(timezone=True), server_default=func.now())
 
     patient = relationship("User", backref="predictions")
@@ -447,6 +480,25 @@ class WaterIntakeDaily(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     patient = relationship("User", backref="water_intake_daily")
+
+
+class MealNutritionLog(Base):
+    """Individual meal nutrition entries within a calendar day."""
+    __tablename__ = "meal_nutrition_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    intake_date = Column(Date, nullable=False, index=True)
+    source = Column(String, nullable=False)  # photo | usda | manual
+    meal_label = Column(String, nullable=True)
+    calories = Column(Float, nullable=False, default=0)
+    carbs_g = Column(Float, nullable=False, default=0)
+    protein_g = Column(Float, nullable=False, default=0)
+    fat_g = Column(Float, nullable=False, default=0)
+    foods_json = Column(JSON, nullable=True)
+    logged_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    patient = relationship("User", backref="meal_nutrition_logs")
 
 
 class WaterIntakeLog(Base):

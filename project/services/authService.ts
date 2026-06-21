@@ -29,6 +29,8 @@ export interface User {
   onboarding_lab_opt_in?: boolean | null;
   lab_upload_pending?: boolean;
   gender?: string | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
   is_diabetic_path?: boolean | null;
   nationality?: string | null;
   marital_status?: string | null;
@@ -89,13 +91,16 @@ class AuthService {
     blood_type?: string;
     address?: string;
     gender?: string;
+    age?: number;
+    height_cm?: number;
+    weight_kg?: number;
+    date_of_birth?: string;
   }): Promise<any> {
     try {
       const baseUrl = environmentConfig.getApiBaseUrl();
       (apiClient as any).baseUrl = baseUrl;
 
-      const response = await apiClient.register(userData);
-      return response;
+      return await apiClient.register(userData);
     } catch (error: any) {
       console.error('Registration error:', error);
       throw new Error(error?.message || 'Registration failed. Please try again.');
@@ -213,8 +218,7 @@ class AuthService {
       try {
         apiClient.setSuppressAuthRefresh(true);
         await apiClient.getCurrentUser();
-        const token = await storageService.getToken();
-        return token;
+        return await storageService.getToken();
       } catch (error) {
         // Token expired, need to re-login
         await this.logout();

@@ -10,6 +10,7 @@ import httpx
 PlaceCategory = Literal["pharmacy", "laboratory"]
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_FALLBACK_URL = "https://overpass.kumi.systems/api/interpreter"
 DEFAULT_RADIUS_METERS = 2000
 REQUEST_TIMEOUT = 45.0
 OVERPASS_HEADERS = {
@@ -34,17 +35,30 @@ def format_distance(meters: float) -> str:
 
 
 def _build_overpass_query(category: PlaceCategory, lat: float, lng: float, radius_m: int) -> str:
-    if category == "pharmacy":
-        filter_line = '["amenity"="pharmacy"]'
-    else:
-        filter_line = '["healthcare"="laboratory"]'
-
     around = f"(around:{radius_m},{lat},{lng})"
+    if category == "pharmacy":
+        return f"""[out:json][timeout:25];
+(
+  node["amenity"="pharmacy"]{around};
+  way["amenity"="pharmacy"]{around};
+  relation["amenity"="pharmacy"]{around};
+  node["shop"="chemist"]{around};
+  way["shop"="chemist"]{around};
+);
+out center tags;"""
+
     return f"""[out:json][timeout:25];
 (
-  node{filter_line}{around};
-  way{filter_line}{around};
-  relation{filter_line}{around};
+  node["healthcare"="laboratory"]{around};
+  way["healthcare"="laboratory"]{around};
+  relation["healthcare"="laboratory"]{around};
+  node["amenity"="clinic"]["healthcare"~"laboratory"]{around};
+  way["amenity"="clinic"]["healthcare"~"laboratory"]{around};
+  node["healthcare"="centre"]["healthcare:speciality"~"laboratory|diagnostic"]{around};
+  way["healthcare"="centre"]["healthcare:speciality"~"laboratory|diagnostic"]{around};
+  node["healthcare"="sample_collection"]{around};
+  way["healthcare"="sample_collection"]{around};
+  node["amenity"="hospital"]["healthcare:speciality"~"laboratory|diagnostic"]{around};
 );
 out center tags;"""
 
@@ -92,11 +106,37 @@ def _maps_url(lat: float, lon: float, name: str) -> str:
     return f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}"
 
 
+def _display_name(tags: dict[str, Any], category: PlaceCategory) -> str | None:
+    for key in ("name", "brand", "operator", "name:en", "name:ar"):
+        value = tags.get(key)
+        if value and str(value).strip():
+            return str(value).strip()
+    if category == "pharmacy" or tags.get("amenity") == "pharmacy" or tags.get("shop") == "chemist":
+        return "Pharmacy"
+    healthcare = str(tags.get("healthcare") or "").lower()
+    amenity = str(tags.get("amenity") or "").lower()
+    speciality = str(tags.get("healthcare:speciality") or "").lower()
+    if (
+        category == "laboratory"
+        or healthcare == "laboratory"
+        or healthcare == "sample_collection"
+        or "laboratory" in healthcare
+        or "laboratory" in speciality
+        or (amenity == "clinic" and "lab" in speciality)
+    ):
+        return "Laboratory"
+    return None
+
+
 def _normalize_element(
-    element: dict[str, Any], origin_lat: float, origin_lng: float
+    element: dict[str, Any],
+    origin_lat: float,
+    origin_lng: float,
+    *,
+    category: PlaceCategory,
 ) -> dict[str, Any] | None:
     tags = element.get("tags") or {}
-    name = tags.get("name") or tags.get("brand") or tags.get("operator")
+    name = _display_name(tags, category)
     if not name:
         return None
 
@@ -122,6 +162,26 @@ def _normalize_element(
     }
 
 
+async def _overpass_request(query: str) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for url in (OVERPASS_URL, OVERPASS_FALLBACK_URL):
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.post(
+                    url,
+                    data={"data": query},
+                    headers=OVERPASS_HEADERS,
+                )
+            if response.status_code == 200:
+                return response.json()
+            last_error = RuntimeError(
+                f"Overpass API error ({response.status_code}): {response.text[:300]}"
+            )
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(str(last_error) if last_error else "Overpass API unavailable")
+
+
 async def search_nearby_places(
     *,
     category: PlaceCategory,
@@ -130,25 +190,16 @@ async def search_nearby_places(
     radius_meters: int = DEFAULT_RADIUS_METERS,
 ) -> list[dict[str, Any]]:
     query = _build_overpass_query(category, latitude, longitude, radius_meters)
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.post(
-            OVERPASS_URL,
-            data={"data": query},
-            headers=OVERPASS_HEADERS,
-        )
-        if response.status_code != 200:
-            detail = response.text[:300]
-            raise RuntimeError(f"Overpass API error ({response.status_code}): {detail}")
-
-        data = response.json()
+    data = await _overpass_request(query)
 
     elements = data.get("elements") or []
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
 
     for element in elements:
-        normalized = _normalize_element(element, latitude, longitude)
+        normalized = _normalize_element(
+            element, latitude, longitude, category=category
+        )
         if not normalized:
             continue
         key = f"{normalized['name']}|{normalized['latitude']:.5f}|{normalized['longitude']:.5f}"

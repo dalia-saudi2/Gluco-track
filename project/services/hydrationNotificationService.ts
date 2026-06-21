@@ -32,7 +32,8 @@ export async function ensureHydrationNotificationSetup(): Promise<void> {
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
         const isHydration =
-          notification.request.content.data?.type === 'hydration_reminder';
+          notification.request.content.data?.type === 'hydration_reminder' ||
+          notification.request.content.data?.type === 'medication_reminder';
         return {
           shouldShowAlert: true,
           shouldPlaySound: isHydration,

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -15,19 +15,35 @@ from onboarding_validation import calculate_age
 from auth import get_current_active_user
 from config import settings
 from database import get_db
-from diabetes_staging_service import predict_from_measurement
+from diabetes_staging_service import predict_from_profile
+from complications_service import (
+    build_raw_from_fields,
+    complication_model_meta,
+    complication_probs,
+    ensure_lab_visits_for_patient,
+    normalize_diabetes_type_label,
+    normalize_gender_label,
+    normalize_hypertension_label,
+    predict_for_patient,
+    upsert_visit,
+    upsert_visit_from_measurement,
+)
+from feature_derivations import years_since_diagnosis
 from feature_constants import LAB_FEATURE_KEYS, TOTAL_FEATURES, activity_level_from_minutes, count_filled_features, profile_completeness_pct
 from lab_reminder_service import cancel_lab_reminders, ensure_pinned_lab_action, schedule_lab_reminders
 from models import DiabetesPrediction, LabUpload, MedicalRecord, PatientClinicalProfile, PatientMeasurement, User
+from model_feature_routing import complications_raw_from_payload, resolve_visit_date
 from patient_sync import sync_patient_from_user
 from risk_summary import build_risk_summary
 from ocr_service import process_lab_file, process_medical_report_file
 from schemas import (
+    ClinicalProfileResponse,
     ClinicalProfileUpdate,
     CompleteLabDataCreate,
     DiabeticPathUpdate,
     HealthFeaturesCreate,
     HealthFeaturesResponse,
+    LabVisitSubmitCreate,
     LabUploadResponse,
     LabUploadReviewUpdate,
     MedicalRecord as MedicalRecordSchema,
@@ -45,8 +61,13 @@ MAX_UPLOAD_BYTES = settings.max_file_size
 
 def _demographics_done(user: User) -> bool:
     return bool(
-        (user.date_of_birth is not None)
-        or (user.age is not None and user.age > 0)
+        user.age is not None
+        and user.age > 0
+        and user.gender
+        and user.height_cm is not None
+        and user.height_cm > 0
+        and user.weight_kg is not None
+        and user.weight_kg > 0
     )
 
 
@@ -149,6 +170,8 @@ def _has_health_features(db: Session, user_id: int) -> bool:
 
 
 def _clinical_profile_done(user: User, db: Session) -> bool:
+    if _has_health_features(db, user.id):
+        return True
     if user.is_diabetic_path is False:
         return True
     if user.is_diabetic_path is not True:
@@ -171,7 +194,7 @@ def build_onboarding_progress(user: User, db: Session) -> OnboardingProgress:
         lab_upload_id=lab.id if lab else None,
         lab_review_done=bool(lab and lab.review_confirmed),
         health_features_done=_has_health_features(db, user.id),
-        onboarding_completed=bool(user.onboarding_completed),
+        onboarding_completed=bool(user.onboarding_completed) and _has_health_features(db, user.id),
     )
 
 
@@ -216,6 +239,30 @@ async def update_diabetic_path(
     return {"is_diabetic_path": current_user.is_diabetic_path}
 
 
+@router.get("/users/me/clinical-profile", response_model=ClinicalProfileResponse)
+async def get_clinical_profile(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    profile = (
+        db.query(PatientClinicalProfile)
+        .filter(PatientClinicalProfile.patient_id == current_user.id)
+        .first()
+    )
+    if not profile:
+        return ClinicalProfileResponse()
+    return ClinicalProfileResponse(
+        diabetes_type=profile.diabetes_type,
+        year_of_diagnosis=profile.year_of_diagnosis,
+        years_since_diagnosis=profile.years_since_diagnosis,
+        medication_list=profile.medication_list,
+        on_insulin=profile.on_insulin,
+        on_metformin=profile.on_metformin,
+        on_statin=profile.on_statin,
+        on_antihypertensive=profile.on_antihypertensive,
+    )
+
+
 @router.patch("/users/me/clinical-profile")
 async def upsert_clinical_profile(
     payload: ClinicalProfileUpdate,
@@ -239,10 +286,18 @@ async def upsert_clinical_profile(
     for field, value in data.items():
         setattr(profile, field, value)
 
+    if profile.year_of_diagnosis is not None:
+        profile.years_since_diagnosis = years_since_diagnosis(profile.year_of_diagnosis)
+
     if htn is not None:
         meas = _latest_measurement(db, current_user.id)
         if meas:
             meas.hypertension_history = htn
+
+    meas = _latest_measurement(db, current_user.id)
+    if meas:
+        signup_date = current_user.created_at.date() if current_user.created_at else date.today()
+        upsert_visit_from_measurement(db, current_user, meas, signup_date, source="clinical_profile")
 
     sync_patient_from_user(db, current_user)
     db.commit()
@@ -415,6 +470,87 @@ async def review_lab_upload(
     return upload
 
 
+def _clinical_profile(db: Session, user_id: int) -> Optional[PatientClinicalProfile]:
+    return (
+        db.query(PatientClinicalProfile)
+        .filter(PatientClinicalProfile.patient_id == user_id)
+        .first()
+    )
+
+
+def _medications_text(profile: Optional[PatientClinicalProfile]) -> str:
+    if not profile or not profile.medication_list:
+        return ""
+    return profile.medication_list.strip()
+
+
+def _sync_clinical_from_visit_fields(
+    db: Session,
+    user: User,
+    *,
+    duration_years: Optional[float] = None,
+    diabetes_type: Optional[str] = None,
+    medications: Optional[str] = None,
+) -> None:
+    profile = _clinical_profile(db, user.id)
+    if profile is None:
+        profile = PatientClinicalProfile(patient_id=user.id)
+        db.add(profile)
+    if duration_years is not None:
+        profile.years_since_diagnosis = int(round(duration_years))
+    if diabetes_type:
+        profile.diabetes_type = diabetes_type
+    if medications is not None:
+        profile.medication_list = medications
+
+
+def _visit_raw_overrides(
+    db: Session,
+    user: User,
+    *,
+    duration_years: Optional[float],
+    visit_age: Optional[int],
+    age: int,
+    bmi: float,
+    hba1c: Optional[float],
+    systolic_bp: Optional[int],
+    diastolic_bp: Optional[int],
+    cholesterol_total: Optional[int],
+    ldl_cholesterol: Optional[int],
+    hdl_cholesterol: Optional[int],
+    triglycerides: Optional[int],
+    hematocrit: Optional[float],
+    visit_gender: Optional[str],
+    diabetes_type: Optional[str],
+    hypertension_history: bool,
+    medications: Optional[str],
+) -> dict[str, Any]:
+    profile = _clinical_profile(db, user.id)
+    duration = duration_years
+    if duration is None and profile and profile.years_since_diagnosis is not None:
+        duration = float(profile.years_since_diagnosis)
+    gender = normalize_gender_label(visit_gender or user.gender)
+    dtype = normalize_diabetes_type_label(diabetes_type or (profile.diabetes_type if profile else None))
+    meds = medications if medications is not None else _medications_text(profile)
+    return build_raw_from_fields(
+        duration_years=duration,
+        age=visit_age or age,
+        bmi=bmi,
+        hba1c=hba1c,
+        systolic_bp=systolic_bp,
+        diastolic_bp=diastolic_bp,
+        total_cholesterol=cholesterol_total,
+        ldl=ldl_cholesterol,
+        hdl=hdl_cholesterol,
+        triglycerides=triglycerides,
+        hematocrit=hematocrit,
+        gender=gender,
+        diabetes_type=dtype,
+        hypertension=normalize_hypertension_label(hypertension_history),
+        medications=meds or "",
+    )
+
+
 def _abdominal_obesity(gender: Optional[str], whr: float) -> bool:
     g = (gender or "").lower()
     if g in ("female", "f"):
@@ -492,8 +628,13 @@ def _create_measurement_and_prediction(
     stress_level=None,
     hba1c=None,
     hematocrit=None,
+    fasting_glucose=None,
+    glucose_postprandial=None,
+    insulin_level=None,
     source_lab_upload_id=None,
     partial: bool = False,
+    visit_date: Optional[date] = None,
+    visit_overrides: Optional[dict[str, Any]] = None,
 ) -> tuple[PatientMeasurement, DiabetesPrediction]:
     db.query(PatientMeasurement).filter(
         PatientMeasurement.patient_id == user.id,
@@ -532,6 +673,7 @@ def _create_measurement_and_prediction(
         stress_level=stress_level,
         hba1c=hba1c,
         hematocrit=hematocrit,
+        fasting_glucose=fasting_glucose,
         is_current=True,
     )
     db.add(measurement)
@@ -539,33 +681,51 @@ def _create_measurement_and_prediction(
     db.refresh(measurement)
 
     imputed = list(LAB_FEATURE_KEYS) if partial else []
-    feature_row = {
-        "age": age,
-        "bmi": measurement.bmi or bmi,
-        "systolic_bp": systolic_bp,
-        "family_history_diabetes": family_history_diabetes,
-        "physical_activity_minutes": physical_activity_minutes,
-        "cholesterol_total": cholesterol_total,
-    }
-    pred_payload = predict_from_measurement(feature_row, partial=partial, imputed_fields=imputed)
+    pred_payload = predict_from_profile(
+        user,
+        measurement,
+        partial=partial,
+        imputed_fields=imputed,
+        glucose_postprandial=glucose_postprandial,
+        insulin_level=insulin_level,
+    )
+
+    vdate = visit_date or date.today()
+    upsert_visit_from_measurement(
+        db, user, measurement, vdate, source=source, overrides=visit_overrides
+    )
+    comp_result = predict_for_patient(db, user.id)
+    if comp_result.get("error"):
+        ret_prob, nep_prob, neu_prob = (
+            pred_payload["retinopathy_risk"],
+            pred_payload["nephropathy_risk"],
+            pred_payload["neuropathy_risk"],
+        )
+        comp_model_name = pred_payload.get("model_name")
+    else:
+        ret_prob, nep_prob, neu_prob = complication_probs(comp_result)
+        comp_model, comp_conf = complication_model_meta(comp_result)
+        comp_model_name = f"complications_{comp_model}" if comp_model else pred_payload.get("model_name")
+
     prediction = DiabetesPrediction(
         patient_id=user.id,
         measurement_id=measurement.id,
         diabetes_stage=pred_payload["diabetes_stage"],
         diabetes_risk_score=pred_payload["diabetes_risk_score"],
         diagnosed_diabetes=pred_payload["diagnosed_diabetes"],
-        retinopathy_risk=pred_payload["retinopathy_risk"],
-        nephropathy_risk=pred_payload["nephropathy_risk"],
-        neuropathy_risk=pred_payload["neuropathy_risk"],
+        retinopathy_risk=ret_prob,
+        nephropathy_risk=nep_prob,
+        neuropathy_risk=neu_prob,
         feature_importances=pred_payload.get("feature_importances"),
         staging_confidence=pred_payload.get("staging_confidence"),
         risk_score_confidence=pred_payload.get("risk_score_confidence"),
         triggered_by="onboarding",
-        model_name=pred_payload.get("model_name"),
+        model_name=comp_model_name,
         is_estimated=pred_payload.get("is_estimated", False),
         features_used=pred_payload.get("features_used"),
         features_total=pred_payload.get("features_total", TOTAL_FEATURES),
         imputed_features=pred_payload.get("imputed_features"),
+        complication_result=None if comp_result.get("error") else comp_result,
     )
     db.add(prediction)
     return measurement, prediction
@@ -576,10 +736,89 @@ async def get_risk_summary(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    ensure_lab_visits_for_patient(db, current_user)
     summary = build_risk_summary(current_user, db)
     if not summary:
         raise HTTPException(status_code=404, detail="No risk prediction available yet.")
     return summary
+
+
+@router.post("/users/me/rerun-prediction", response_model=RiskSummary)
+async def rerun_prediction(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    if not _has_health_features(db, current_user.id):
+        raise HTTPException(
+            status_code=400,
+            detail="Complete your clinical information to receive AI predictions.",
+        )
+
+    measurement = _latest_measurement(db, current_user.id)
+    if not measurement:
+        raise HTTPException(status_code=404, detail="No health profile found.")
+
+    ensure_lab_visits_for_patient(db, current_user)
+
+    partial = not bool(measurement.lab_data_complete)
+    prev_pred = _latest_prediction(db, current_user.id)
+    imputed = list(prev_pred.imputed_features or []) if prev_pred and prev_pred.imputed_features else []
+    if partial and not imputed:
+        from feature_constants import LAB_FEATURE_KEYS
+        imputed = list(LAB_FEATURE_KEYS)
+
+    pred_payload = predict_from_profile(
+        current_user, measurement, partial=partial, imputed_fields=imputed
+    )
+    comp_result = predict_for_patient(db, current_user.id)
+    if comp_result.get("error"):
+        ret_prob, nep_prob, neu_prob = (
+            pred_payload["retinopathy_risk"],
+            pred_payload["nephropathy_risk"],
+            pred_payload["neuropathy_risk"],
+        )
+        comp_model_name = pred_payload.get("model_name")
+    else:
+        ret_prob, nep_prob, neu_prob = complication_probs(comp_result)
+        comp_model, _ = complication_model_meta(comp_result)
+        comp_model_name = f"complications_{comp_model}" if comp_model else pred_payload.get("model_name")
+
+    prediction = DiabetesPrediction(
+        patient_id=current_user.id,
+        measurement_id=measurement.id,
+        diabetes_stage=pred_payload["diabetes_stage"],
+        diabetes_risk_score=pred_payload["diabetes_risk_score"],
+        diagnosed_diabetes=pred_payload["diagnosed_diabetes"],
+        retinopathy_risk=ret_prob,
+        nephropathy_risk=nep_prob,
+        neuropathy_risk=neu_prob,
+        feature_importances=pred_payload.get("feature_importances"),
+        staging_confidence=pred_payload.get("staging_confidence"),
+        risk_score_confidence=pred_payload.get("risk_score_confidence"),
+        triggered_by="dashboard_rerun",
+        model_name=comp_model_name,
+        is_estimated=pred_payload.get("is_estimated", False),
+        features_used=pred_payload.get("features_used"),
+        features_total=pred_payload.get("features_total", TOTAL_FEATURES),
+        imputed_features=pred_payload.get("imputed_features"),
+        complication_result=None if comp_result.get("error") else comp_result,
+    )
+    db.add(prediction)
+    db.commit()
+
+    summary = build_risk_summary(current_user, db)
+    if not summary:
+        raise HTTPException(status_code=500, detail="Failed to build risk summary.")
+    return summary
+
+
+def _latest_prediction(db: Session, user_id: int) -> Optional[DiabetesPrediction]:
+    return (
+        db.query(DiabetesPrediction)
+        .filter(DiabetesPrediction.patient_id == user_id)
+        .order_by(DiabetesPrediction.predicted_at.desc())
+        .first()
+    )
 
 
 @router.get("/users/me/notifications")
@@ -628,9 +867,8 @@ async def submit_health_features(
         if not upload or not upload.review_confirmed:
             raise HTTPException(status_code=400, detail="Confirm lab review before submitting health features.")
 
-    if not is_partial:
-        if not payload.systolic_bp or not payload.diastolic_bp or not payload.heart_rate:
-            raise HTTPException(status_code=400, detail="Blood pressure and heart rate are required for a complete profile.")
+    if not is_partial and (not payload.systolic_bp or not payload.diastolic_bp or not payload.heart_rate):
+        raise HTTPException(status_code=400, detail="Blood pressure and heart rate are required for a complete profile.")
 
     age = current_user.age
     if age is None and current_user.date_of_birth:
@@ -642,13 +880,27 @@ async def submit_health_features(
     bmi = round(payload.weight_kg / (height_m * height_m), 2)
     whr = round(payload.waist_cm / max(payload.hip_cm, 1), 3)
 
+    if payload.visit_gender:
+        current_user.gender = payload.visit_gender.strip().lower()
+
+    _sync_clinical_from_visit_fields(
+        db,
+        current_user,
+        duration_years=payload.duration_years,
+        diabetes_type=payload.diabetes_type,
+        medications=payload.medications,
+    )
+
+    visit_overrides = complications_raw_from_payload(payload, current_user, age=age, bmi=bmi)
+
     source = "manual_partial" if is_partial else ("ocr" if payload.source_lab_upload_id else "manual")
+    visit_date = resolve_visit_date(payload, current_user)
     measurement, prediction = _create_measurement_and_prediction(
         db,
         current_user,
         source=source,
         lab_data_complete=not is_partial,
-        age=age,
+        age=payload.visit_age or age,
         bmi=bmi,
         whr=whr,
         abdominal_obesity=_abdominal_obesity(current_user.gender, whr),
@@ -664,21 +916,26 @@ async def submit_health_features(
         weight_kg=payload.weight_kg,
         waist_cm=payload.waist_cm,
         hip_cm=payload.hip_cm,
-        systolic_bp=None if is_partial else payload.systolic_bp,
-        diastolic_bp=None if is_partial else payload.diastolic_bp,
+        systolic_bp=payload.systolic_bp,
+        diastolic_bp=payload.diastolic_bp,
         heart_rate=None if is_partial else payload.heart_rate,
-        cholesterol_total=None if is_partial else payload.cholesterol_total,
-        ldl_cholesterol=None if is_partial else payload.ldl_cholesterol,
-        hdl_cholesterol=None if is_partial else payload.hdl_cholesterol,
-        triglycerides=None if is_partial else payload.triglycerides,
+        cholesterol_total=payload.cholesterol_total,
+        ldl_cholesterol=payload.ldl_cholesterol,
+        hdl_cholesterol=payload.hdl_cholesterol,
+        triglycerides=payload.triglycerides,
         years_since_quit=payload.years_since_quit,
         cigarettes_per_day=payload.cigarettes_per_day,
         diet_quality=payload.diet_quality,
         stress_level=payload.stress_level,
         hba1c=payload.hba1c,
         hematocrit=payload.hematocrit,
+        fasting_glucose=payload.fasting_glucose,
+        glucose_postprandial=payload.glucose_postprandial,
+        insulin_level=payload.insulin_level,
         source_lab_upload_id=payload.source_lab_upload_id,
         partial=is_partial,
+        visit_date=visit_date,
+        visit_overrides=visit_overrides,
     )
 
     sync_patient_from_user(db, current_user)
@@ -689,6 +946,8 @@ async def submit_health_features(
         ensure_pinned_lab_action(db, current_user.id)
     else:
         cancel_lab_reminders(db, current_user.id)
+        from clinical_notification_service import cancel_clinical_profile_notification
+        cancel_clinical_profile_notification(db, current_user.id)
 
     db.commit()
     db.refresh(measurement)
@@ -704,6 +963,119 @@ async def submit_health_features(
     )
 
 
+@router.post("/users/me/lab-visits", response_model=RiskSummary)
+async def submit_lab_visit(
+    payload: LabVisitSubmitCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Log or update a lab visit by date; reruns complications model on full visit history."""
+    if not _has_health_features(db, current_user.id):
+        raise HTTPException(status_code=400, detail="Complete Health Features onboarding first.")
+
+    visit_date = payload.visit_date or date.today()
+    gender_norm = normalize_gender_label(payload.gender)
+    dtype_norm = normalize_diabetes_type_label(payload.diabetes_type)
+    htn_norm = normalize_hypertension_label(payload.hypertension)
+
+    if payload.gender:
+        current_user.gender = payload.gender.strip().lower()
+    _sync_clinical_from_visit_fields(
+        db,
+        current_user,
+        duration_years=payload.duration_years,
+        diabetes_type=payload.diabetes_type,
+        medications=payload.medications,
+    )
+
+    raw = build_raw_from_fields(
+        duration_years=payload.duration_years,
+        age=payload.age,
+        bmi=payload.bmi,
+        hba1c=payload.hba1c,
+        systolic_bp=payload.systolic_bp,
+        diastolic_bp=payload.diastolic_bp,
+        total_cholesterol=payload.total_cholesterol,
+        ldl=payload.ldl,
+        hdl=payload.hdl,
+        triglycerides=payload.triglycerides,
+        hematocrit=payload.hematocrit,
+        gender=gender_norm,
+        diabetes_type=dtype_norm,
+        hypertension=htn_norm,
+        medications=(payload.medications or "").strip(),
+    )
+    upsert_visit(db, current_user.id, visit_date, raw, source="lab_visit")
+
+    measurement = _latest_measurement(db, current_user.id)
+    if measurement:
+        measurement.age = payload.age
+        measurement.systolic_bp = payload.systolic_bp
+        measurement.diastolic_bp = payload.diastolic_bp
+        measurement.cholesterol_total = payload.total_cholesterol
+        measurement.ldl_cholesterol = payload.ldl
+        measurement.hdl_cholesterol = payload.hdl
+        measurement.triglycerides = payload.triglycerides
+        measurement.hba1c = payload.hba1c
+        measurement.hematocrit = payload.hematocrit
+        measurement.hypertension_history = htn_norm == "Yes"
+        db.flush()
+
+    partial = not bool(measurement and measurement.lab_data_complete)
+    prev_pred = _latest_prediction(db, current_user.id)
+    imputed = list(prev_pred.imputed_features or []) if prev_pred and prev_pred.imputed_features else []
+    if partial and not imputed:
+        imputed = list(LAB_FEATURE_KEYS)
+
+    if not measurement:
+        raise HTTPException(status_code=404, detail="No health profile found.")
+
+    pred_payload = predict_from_profile(
+        current_user, measurement, partial=partial, imputed_fields=imputed
+    )
+    comp_result = predict_for_patient(db, current_user.id)
+    if comp_result.get("error"):
+        ret_prob, nep_prob, neu_prob = (
+            pred_payload["retinopathy_risk"],
+            pred_payload["nephropathy_risk"],
+            pred_payload["neuropathy_risk"],
+        )
+        comp_model_name = pred_payload.get("model_name")
+    else:
+        ret_prob, nep_prob, neu_prob = complication_probs(comp_result)
+        comp_model, _ = complication_model_meta(comp_result)
+        comp_model_name = f"complications_{comp_model}" if comp_model else pred_payload.get("model_name")
+
+    prediction = DiabetesPrediction(
+        patient_id=current_user.id,
+        measurement_id=measurement.id if measurement else None,
+        diabetes_stage=pred_payload["diabetes_stage"],
+        diabetes_risk_score=pred_payload["diabetes_risk_score"],
+        diagnosed_diabetes=pred_payload["diagnosed_diabetes"],
+        retinopathy_risk=ret_prob,
+        nephropathy_risk=nep_prob,
+        neuropathy_risk=neu_prob,
+        feature_importances=pred_payload.get("feature_importances"),
+        staging_confidence=pred_payload.get("staging_confidence"),
+        risk_score_confidence=pred_payload.get("risk_score_confidence"),
+        triggered_by="lab_visit",
+        model_name=comp_model_name,
+        is_estimated=pred_payload.get("is_estimated", False),
+        features_used=pred_payload.get("features_used"),
+        features_total=pred_payload.get("features_total", TOTAL_FEATURES),
+        imputed_features=pred_payload.get("imputed_features"),
+        complication_result=None if comp_result.get("error") else comp_result,
+    )
+    db.add(prediction)
+    sync_patient_from_user(db, current_user)
+    db.commit()
+
+    summary = build_risk_summary(current_user, db)
+    if not summary:
+        raise HTTPException(status_code=500, detail="Failed to build risk summary.")
+    return summary
+
+
 @router.post("/onboarding/complete-lab-data", response_model=HealthFeaturesResponse)
 async def complete_lab_data(
     payload: CompleteLabDataCreate,
@@ -717,6 +1089,7 @@ async def complete_lab_data(
     if not prev:
         raise HTTPException(status_code=400, detail="No existing health profile found.")
 
+    visit_date = payload.visit_date or date.today()
     measurement, prediction = _create_measurement_and_prediction(
         db,
         current_user,
@@ -745,8 +1118,11 @@ async def complete_lab_data(
         ldl_cholesterol=payload.ldl_cholesterol,
         hdl_cholesterol=payload.hdl_cholesterol,
         triglycerides=payload.triglycerides,
+        hba1c=prev.hba1c,
+        hematocrit=prev.hematocrit,
         source_lab_upload_id=payload.source_lab_upload_id,
         partial=False,
+        visit_date=visit_date,
     )
 
     current_user.lab_upload_pending = False

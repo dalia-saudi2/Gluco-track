@@ -127,7 +127,8 @@ export default function RecordsUploadScreen() {
     await refreshUser();
     const currentUser = await authService.getCurrentUser();
     if (currentUser?.onboarding_completed !== true) {
-      const next = await resolveOnboardingRoute(currentUser);
+      const progress = await apiClient.getOnboardingProgress();
+      const next = await resolveOnboardingRoute(currentUser, progress);
       replaceOnboardingStep(router, next);
       return;
     }
@@ -156,7 +157,7 @@ export default function RecordsUploadScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.9,
     });
     if (result.canceled || !result.assets[0]) return;

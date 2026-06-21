@@ -68,7 +68,8 @@
         "expo-notifications",
         {
           "sounds": [
-            "./assets/sounds/hydration_reminder.mp3"
+            "./assets/sounds/hydration_reminder.mp3",
+            "./assets/sounds/reminder.mp3"
           ]
         }
       ],

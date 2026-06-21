@@ -1,12 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { authService, User } from '../services/authService';
 import { environmentConfig } from '../config/environment';
 import { apiClient } from '../config/api';
+import type { OnboardingProgress } from '../utils/labOnboarding';
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  onboardingProgress: OnboardingProgress | null;
+  onboardingProgressLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (userData: {
     email: string;
@@ -16,11 +19,16 @@ interface AuthContextType {
     blood_type?: string;
     address?: string;
     gender?: string;
+    age?: number;
+    height_cm?: number;
+    weight_kg?: number;
     date_of_birth?: string;
   }) => Promise<void>;
   loginWithGoogle: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  refreshOnboardingProgress: () => Promise<void>;
+  getOnboardingProgressForRouting: () => OnboardingProgress | null;
   setApiBaseUrl: (url: string) => Promise<void>;
   getApiBaseUrl: () => string;
 }
@@ -43,6 +51,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [onboardingProgress, setOnboardingProgress] = useState<OnboardingProgress | null>(null);
+  const [onboardingProgressLoading, setOnboardingProgressLoading] = useState(false);
+  const onboardingProgressRef = useRef<OnboardingProgress | null>(null);
+
+  const applyOnboardingProgress = useCallback((progress: OnboardingProgress | null) => {
+    onboardingProgressRef.current = progress;
+    setOnboardingProgress(progress);
+  }, []);
+
+  const getOnboardingProgressForRouting = useCallback(
+    () => onboardingProgressRef.current ?? onboardingProgress,
+    [onboardingProgress]
+  );
+
+  const loadOnboardingProgress = useCallback(async (currentUser: User | null) => {
+    if (!currentUser) {
+      applyOnboardingProgress(null);
+      return null;
+    }
+    setOnboardingProgressLoading(true);
+    try {
+      const progress = await apiClient.getOnboardingProgress();
+      applyOnboardingProgress(progress);
+      return progress;
+    } catch {
+      applyOnboardingProgress(null);
+      return null;
+    } finally {
+      setOnboardingProgressLoading(false);
+    }
+  }, [applyOnboardingProgress]);
+
+  const refreshOnboardingProgress = useCallback(async () => {
+    await loadOnboardingProgress(user);
+  }, [loadOnboardingProgress, user]);
 
   // Initialize auth state on mount
   useEffect(() => {
@@ -67,14 +110,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (currentUser) {
         setUser(currentUser);
         setIsAuthenticated(true);
+        await loadOnboardingProgress(currentUser);
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        applyOnboardingProgress(null);
       }
     } catch (error) {
       console.error('Auth initialization error:', error);
       setIsAuthenticated(false);
       setUser(null);
+      applyOnboardingProgress(null);
     } finally {
       setIsLoading(false);
     }
@@ -87,9 +133,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const currentUser = await authService.getCurrentUser();
       setUser(currentUser);
       setIsAuthenticated(true);
+      await loadOnboardingProgress(currentUser);
     } catch (error: any) {
       setIsAuthenticated(false);
       setUser(null);
+      applyOnboardingProgress(null);
       throw error;
     } finally {
       setIsLoading(false);
@@ -104,6 +152,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     blood_type?: string;
     address?: string;
     gender?: string;
+    age?: number;
+    height_cm?: number;
+    weight_kg?: number;
     date_of_birth?: string;
   }) => {
     try {
@@ -113,9 +164,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const currentUser = await authService.getCurrentUser();
       setUser(currentUser);
       setIsAuthenticated(true);
+      await loadOnboardingProgress(currentUser);
     } catch (error: unknown) {
       setIsAuthenticated(false);
       setUser(null);
+      applyOnboardingProgress(null);
       throw error;
     } finally {
       setIsLoading(false);
@@ -129,9 +182,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const currentUser = await authService.getCurrentUser();
       setUser(currentUser);
       setIsAuthenticated(true);
+      await loadOnboardingProgress(currentUser);
     } catch (error: any) {
       setIsAuthenticated(false);
       setUser(null);
+      applyOnboardingProgress(null);
       throw error;
     } finally {
       setIsLoading(false);
@@ -143,10 +198,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await authService.logout();
       setUser(null);
       setIsAuthenticated(false);
+      applyOnboardingProgress(null);
     } catch (error) {
       console.error('Logout error:', error);
       setUser(null);
       setIsAuthenticated(false);
+      applyOnboardingProgress(null);
     }
   };
 
@@ -154,6 +211,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const currentUser = await authService.getCurrentUser();
       setUser(currentUser);
+      await loadOnboardingProgress(currentUser);
     } catch (error: any) {
       console.error('Refresh user error:', error);
       // If refresh fails (especially 401), user is logged out
@@ -181,11 +239,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         user,
         isAuthenticated,
         isLoading,
+        onboardingProgress,
+        onboardingProgressLoading,
         login,
         register,
         loginWithGoogle,
         logout,
         refreshUser,
+        refreshOnboardingProgress,
+        getOnboardingProgressForRouting,
         setApiBaseUrl,
         getApiBaseUrl,
       }}

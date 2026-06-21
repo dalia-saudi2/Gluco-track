@@ -33,6 +33,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Prefer backend/.env over stale OS-level env vars (common on Windows dev machines).
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
+
     # Database — always points at project/backend/healthcare.db unless overridden
     database_url: str = os.getenv(
         "DATABASE_URL",
@@ -57,18 +69,6 @@ class Settings(BaseSettings):
 
     # Vercel AI Gateway — used by /chat/llm proxy (required for Expo web chat)
     ai_gateway_api_key: str = ""
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Prefer backend/.env over stale OS-level env vars (common on Windows dev machines).
-        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
     # USDA FoodData Central (optional; meal carb lookup)
     usda_fdc_api_key: str = os.getenv("USDA_FDC_API_KEY", "")

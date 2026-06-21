@@ -9,6 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Bell, X } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { apiClient } from '../../config/api';
 import { DF, DashboardPalette } from '../../constants/DashboardColors';
@@ -31,6 +32,7 @@ type Props = {
 
 export function RemindersBellButton({ iconBtnStyle }: Props) {
   const D = useD();
+  const router = useRouter();
   const styles = createStyles(D);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -59,6 +61,13 @@ export function RemindersBellButton({ iconBtnStyle }: Props) {
   };
 
   const close = () => setOpen(false);
+
+  const handleItemPress = (item: AppNotification) => {
+    close();
+    if (item.type === 'clinical_profile_incomplete') {
+      router.push('/complete-health-profile');
+    }
+  };
 
   return (
     <>
@@ -89,10 +98,14 @@ export function RemindersBellButton({ iconBtnStyle }: Props) {
             ) : (
               <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
                 {items.map((item) => (
-                  <View key={item.id} style={[styles.row, item.pinned && styles.rowPinned]}>
+                  <Pressable
+                    key={item.id}
+                    onPress={() => handleItemPress(item)}
+                    style={[styles.row, item.pinned && styles.rowPinned]}
+                  >
                     <Text style={styles.rowTitle}>{item.title}</Text>
                     <Text style={styles.rowBody}>{item.body}</Text>
-                  </View>
+                  </Pressable>
                 ))}
               </ScrollView>
             )}

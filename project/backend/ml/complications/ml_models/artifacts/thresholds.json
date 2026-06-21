@@ -1,0 +1,17 @@
+{
+  "xgb_thresholds": {
+    "Retinopathy": 0.3919912040233612,
+    "Nephropathy": 1.0,
+    "Neuropathy": 0.7607286214828491
+  },
+  "lstm_thresholds": {
+    "Retinopathy": 0.3180166780948639,
+    "Nephropathy": 0.9999949932098389,
+    "Neuropathy": 0.3930267095565796
+  },
+  "ensemble_thresholds": {
+    "Retinopathy": 0.28787878155708313,
+    "Nephropathy": 1.0,
+    "Neuropathy": 0.3333333432674408
+  }
+}

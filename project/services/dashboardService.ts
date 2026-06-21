@@ -75,6 +75,13 @@ export interface DashboardResponse {
   unread_messages: number;
   health_metrics: {
     blood_type?: string;
+    bmi?: string;
+    blood_pressure?: string;
+    weight_kg?: number;
+    height_cm?: number;
+    bmi_group?: string;
+    hba1c?: number | null;
+    hba1c_measured_at?: string | null;
     total_appointments: number;
     active_medications: number;
     unread_messages: number;

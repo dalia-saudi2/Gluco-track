@@ -20,11 +20,13 @@ type Props = {
   onViewTrend?: () => void;
   onPressCard?: () => void;
   showActions?: boolean;
+  compact?: boolean;
 };
 
 const Y_MIN = 50;
 const Y_MAX = 220;
-const CHART_HEIGHT = 132;
+const CHART_HEIGHT_DEFAULT = 132;
+const CHART_HEIGHT_COMPACT = 88;
 const THRESHOLD_HIGH = 180;
 const THRESHOLD_ELEVATED = 140;
 const THRESHOLD_LOW = 70;
@@ -77,8 +79,8 @@ function statusDotColor(tier: GlucoseTier): string {
   return '#94a3b8';
 }
 
-function valueToY(value: number): number {
-  return CHART_HEIGHT - ((value - Y_MIN) / (Y_MAX - Y_MIN)) * CHART_HEIGHT;
+function valueToY(value: number, chartHeight: number): number {
+  return chartHeight - ((value - Y_MIN) / (Y_MAX - Y_MIN)) * chartHeight;
 }
 
 function buildSmoothPath(points: { x: number; y: number }[]): string {
@@ -109,6 +111,16 @@ const legendStyles = StyleSheet.create({
   text: { fontFamily: DF.medium, fontSize: 9, color: '#64748b' },
 });
 
+const DEFAULT_GLUCOSE_DAYS: GlucoseDayPoint[] = [
+  { day: 'Mon', value: null },
+  { day: 'Tue', value: null },
+  { day: 'Wed', value: null },
+  { day: 'Thu', value: null },
+  { day: 'Fri', value: null },
+  { day: 'Sat', value: null },
+  { day: 'Sun', value: null },
+];
+
 export function GlucoseStabilityCard({
   days,
   D,
@@ -118,27 +130,30 @@ export function GlucoseStabilityCard({
   onViewTrend,
   onPressCard,
   showActions = true,
+  compact = false,
 }: Props) {
-  const s = useMemo(() => createStyles(D), [D]);
+  const chartHeight = compact ? CHART_HEIGHT_COMPACT : CHART_HEIGHT_DEFAULT;
+  const s = useMemo(() => createStyles(D, compact), [D, compact]);
+  const displayDays = days.length > 0 ? days : DEFAULT_GLUCOSE_DAYS;
 
   const layout = useMemo(() => {
-    const plotted = days
+    const plotted = displayDays
       .map((d, i) => {
         if (d.value == null) return null;
         const tier = glucoseTier(d.value);
-        const x = days.length === 1 ? 50 : (i / (days.length - 1)) * 100;
-        const y = valueToY(d.value);
+        const x = displayDays.length === 1 ? 50 : (i / (displayDays.length - 1)) * 100;
+        const y = valueToY(d.value, chartHeight);
         return { ...d, tier, x, y };
       })
       .filter(Boolean) as Array<GlucoseDayPoint & { tier: GlucoseTier; x: number; y: number }>;
 
     const linePath = buildSmoothPath(plotted.map((p) => ({ x: p.x, y: p.y })));
 
-    const yHigh = valueToY(THRESHOLD_HIGH);
-    const yElevated = valueToY(THRESHOLD_ELEVATED);
-    const yLow = valueToY(THRESHOLD_LOW);
+    const yHigh = valueToY(THRESHOLD_HIGH, chartHeight);
+    const yElevated = valueToY(THRESHOLD_ELEVATED, chartHeight);
+    const yLow = valueToY(THRESHOLD_LOW, chartHeight);
 
-    const withValues = days.filter((d) => d.value != null);
+    const withValues = displayDays.filter((d) => d.value != null);
     const inRangeCount = withValues.filter((d) => {
       const t = glucoseTier(d.value);
       return t === 'normal' || t === 'elevated';
@@ -146,7 +161,7 @@ export function GlucoseStabilityCard({
     const elevatedDays = withValues.filter((d) => glucoseTier(d.value) === 'elevated');
     const highDays = withValues.filter((d) => glucoseTier(d.value) === 'high');
 
-    const todayEntry = days.find((d) => d.day === todayDay);
+    const todayEntry = displayDays.find((d) => d.day === todayDay);
     const todayValue = todayEntry?.value ?? plotted[plotted.length - 1]?.value ?? null;
     const todayTier = glucoseTier(todayValue);
     const displayTodayTier = todayStatus ? serverStatusTier(todayStatus) : todayTier;
@@ -165,7 +180,7 @@ export function GlucoseStabilityCard({
       displayTodayTier,
       displayTodayLabel,
     };
-  }, [days, todayDay, todayStatus]);
+  }, [displayDays, todayDay, todayStatus, chartHeight]);
 
   const yLabels = [220, 180, 140, 70, 50];
 
@@ -192,7 +207,7 @@ export function GlucoseStabilityCard({
             <LegendItem color="#22c55e" label="Normal" />
             <LegendItem color="#ea580c" label="Elevated" />
             <LegendItem color="#dc2626" label="High" />
-            <LegendItem color="#94a3b8" label="No data" />
+            {!compact ? <LegendItem color="#94a3b8" label="No data" /> : null}
           </View>
         </Pressable>
         {showActions ? (
@@ -210,7 +225,7 @@ export function GlucoseStabilityCard({
       <Pressable
         onPress={onPressCard}
         disabled={!onPressCard}
-        style={({ pressed }) => [onPressCard && pressed && s.cardPressed]}
+        style={({ pressed }) => [s.chartPressable, onPressCard && pressed && s.cardPressed]}
       >
       <View style={s.chartRow}>
         <View style={s.yAxis}>
@@ -222,7 +237,7 @@ export function GlucoseStabilityCard({
         </View>
 
         <View style={s.chartArea}>
-          <Svg width="100%" height={CHART_HEIGHT} viewBox={`0 0 100 ${CHART_HEIGHT}`} preserveAspectRatio="none">
+          <Svg width="100%" height={chartHeight} viewBox={`0 0 100 ${chartHeight}`} preserveAspectRatio="none">
             <Rect x={0} y={0} width={100} height={layout.yHigh} fill="rgba(254,226,226,0.45)" />
             <Rect
               x={0}
@@ -235,9 +250,9 @@ export function GlucoseStabilityCard({
               <Line
                 key={threshold}
                 x1={0}
-                y1={valueToY(threshold)}
+                y1={valueToY(threshold, chartHeight)}
                 x2={100}
-                y2={valueToY(threshold)}
+                y2={valueToY(threshold, chartHeight)}
                 stroke={threshold === THRESHOLD_HIGH ? 'rgba(220,38,38,0.35)' : threshold === THRESHOLD_ELEVATED ? 'rgba(234,88,12,0.35)' : 'rgba(34,197,94,0.35)'}
                 strokeWidth={0.6}
                 strokeDasharray="3 3"
@@ -267,9 +282,9 @@ export function GlucoseStabilityCard({
           </Svg>
 
           <View style={s.valueOverlay} pointerEvents="none">
-            {days.map((d, i) => {
+            {displayDays.map((d, i) => {
               const tier = glucoseTier(d.value);
-              const xPct = days.length === 1 ? 50 : (i / (days.length - 1)) * 100;
+              const xPct = displayDays.length === 1 ? 50 : (i / (displayDays.length - 1)) * 100;
               return (
                 <View key={`${d.day}-val`} style={[s.valueCol, { left: `${xPct}%`, marginLeft: -14 }]}>
                   {d.value != null ? (
@@ -285,16 +300,18 @@ export function GlucoseStabilityCard({
             })}
           </View>
 
-          <View style={s.thresholdLabels} pointerEvents="none">
-            <Text style={[s.thresholdText, { top: layout.yHigh - 5, color: '#dc2626' }]}>180</Text>
-            <Text style={[s.thresholdText, { top: layout.yElevated - 5, color: '#ea580c' }]}>140</Text>
-            <Text style={[s.thresholdText, { top: layout.yLow - 5, color: '#22c55e' }]}>70</Text>
-          </View>
+          {!compact ? (
+            <View style={s.thresholdLabels} pointerEvents="none">
+              <Text style={[s.thresholdText, { top: layout.yHigh - 5, color: '#dc2626' }]}>180</Text>
+              <Text style={[s.thresholdText, { top: layout.yElevated - 5, color: '#ea580c' }]}>140</Text>
+              <Text style={[s.thresholdText, { top: layout.yLow - 5, color: '#22c55e' }]}>70</Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
       <View style={s.dayRow}>
-        {days.map((d) => {
+        {displayDays.map((d) => {
           const tier = glucoseTier(d.value);
           const abnormal = tier === 'elevated' || tier === 'high';
           return (
@@ -340,41 +357,43 @@ export function GlucoseTrendChart(props: Props) {
   return <GlucoseStabilityCard {...props} />;
 }
 
-function createStyles(D: DashboardPalette) {
+function createStyles(D: DashboardPalette, compact: boolean) {
+  const chartHeight = compact ? CHART_HEIGHT_COMPACT : CHART_HEIGHT_DEFAULT;
   return StyleSheet.create({
-    wrap: { gap: 4 },
+    wrap: { gap: compact ? 2 : 4, width: '100%' },
+    chartPressable: { width: '100%', alignSelf: 'stretch' },
     cardPressed: { opacity: 0.92 },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
-      marginBottom: 4,
+      marginBottom: compact ? 2 : 4,
     },
-    headerMain: { flex: 1, paddingRight: 8 },
+    headerMain: { flex: 1, paddingRight: 8, minWidth: 0 },
     sectionLabel: {
       fontFamily: DF.bold,
-      fontSize: 10,
+      fontSize: compact ? 9 : 10,
       color: D.onSurfaceVariant,
-      letterSpacing: 2,
+      letterSpacing: compact ? 1.5 : 2,
       textTransform: 'uppercase',
     },
     mainValue: {
       fontFamily: DF.bold,
-      fontSize: 32,
+      fontSize: compact ? 22 : 32,
       color: D.primary,
-      marginTop: 2,
-      lineHeight: 36,
+      marginTop: compact ? 0 : 2,
+      lineHeight: compact ? 26 : 36,
     },
-    unit: { fontFamily: DF.bold, fontSize: 14, color: D.onSurfaceVariant },
-    todayRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+    unit: { fontFamily: DF.bold, fontSize: compact ? 11 : 14, color: D.onSurfaceVariant },
+    todayRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: compact ? 2 : 4 },
     todayDot: { width: 7, height: 7, borderRadius: 4 },
-    todayText: { fontFamily: DF.medium, fontSize: 11, color: D.onSurfaceVariant },
-    legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
-    headerActions: { flexDirection: 'row', gap: 8 },
+    todayText: { fontFamily: DF.medium, fontSize: compact ? 10 : 11, color: D.onSurfaceVariant },
+    legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: compact ? 6 : 10, marginTop: compact ? 4 : 8 },
+    headerActions: { flexDirection: 'row', gap: compact ? 6 : 8 },
     iconBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
+      width: compact ? 28 : 34,
+      height: compact ? 28 : 34,
+      borderRadius: compact ? 8 : 10,
       borderWidth: 1,
       borderColor: D.cardBorder,
       backgroundColor: D.surfaceContainerLow,
@@ -383,15 +402,21 @@ function createStyles(D: DashboardPalette) {
     },
     iconBtnPrimary: { borderColor: 'rgba(224,64,160,0.25)', backgroundColor: 'rgba(224,64,160,0.06)' },
     iconBtnChart: { borderColor: 'rgba(0,150,204,0.3)', backgroundColor: 'rgba(0,150,204,0.08)' },
-    chartRow: { flexDirection: 'row', alignItems: 'stretch', marginTop: 4 },
+    chartRow: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      marginTop: compact ? 2 : 4,
+      width: '100%',
+      minHeight: chartHeight,
+    },
     yAxis: {
-      width: 26,
-      height: CHART_HEIGHT,
+      width: compact ? 22 : 26,
+      height: chartHeight,
       justifyContent: 'space-between',
       paddingVertical: 2,
     },
-    yLabel: { fontFamily: DF.medium, fontSize: 8, color: D.onSurfaceVariant, textAlign: 'right' },
-    chartArea: { flex: 1, position: 'relative', height: CHART_HEIGHT },
+    yLabel: { fontFamily: DF.medium, fontSize: compact ? 7 : 8, color: D.onSurfaceVariant, textAlign: 'right' },
+    chartArea: { flex: 1, position: 'relative', height: chartHeight },
     valueOverlay: {
       position: 'absolute',
       left: 0,
@@ -420,7 +445,7 @@ function createStyles(D: DashboardPalette) {
     dayRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      paddingLeft: 26,
+      paddingLeft: compact ? 22 : 26,
       marginTop: 2,
     },
     dayCol: { flex: 1, alignItems: 'center' },
@@ -430,7 +455,7 @@ function createStyles(D: DashboardPalette) {
       color: D.onSurfaceVariant,
       textTransform: 'uppercase',
     },
-    chipRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap', paddingLeft: 26 },
+    chipRow: { flexDirection: 'row', gap: compact ? 6 : 8, marginTop: compact ? 6 : 10, flexWrap: 'wrap', paddingLeft: compact ? 22 : 26 },
     chipGreen: {
       paddingHorizontal: 10,
       paddingVertical: 4,

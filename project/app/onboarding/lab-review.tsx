@@ -16,10 +16,8 @@ import { showToast } from '../../components/ToastProvider';
 import { useAuth } from '../../contexts/AuthContext';
 import { LabOnboardingColors as C } from '../../constants/LabOnboardingColors';
 import { LAB_OCR_FIELDS, type ExtractedLabField, type LabFieldKey } from '../../utils/labOnboarding';
-import { resolveOnboardingRoute } from '../../utils/resolveOnboardingRoute';
 import { replaceOnboardingStep } from '../../utils/onboardingNavigation';
 import { consumeLabUploadReturnTo, exitLabUploadFlow, peekLabUploadReturnTo } from '../../utils/labUploadReturn';
-import { authService } from '../../services/authService';
 import { useOnboardingNav } from '../../utils/useOnboardingNav';
 
 const FONT = { medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
@@ -142,11 +140,14 @@ export default function LabReviewScreen() {
         );
         router.replace(consumeLabUploadReturnTo('/(tabs)'));
       } else {
-        showToast.success('Saved', 'Continue with lifestyle and body measurements.');
+        showToast.success('Saved', 'Continue with your health profile.');
         await refreshUser();
-        const refreshed = await authService.getCurrentUser();
-        const next = await resolveOnboardingRoute(refreshed);
-        replaceOnboardingStep(router, next);
+        const returnTo = peekLabUploadReturnTo();
+        if (returnTo) {
+          router.replace(returnTo as never);
+        } else {
+          replaceOnboardingStep(router, '/onboarding/health-features');
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not save review.';

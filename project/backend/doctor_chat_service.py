@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from models import DoctorConversation, DoctorConversationMessage, User
 
+DEFAULT_DOCTOR_NAME = "Dr. Amira Mansour"
+
 
 def _preview(content: str, limit: int = 80) -> str:
     text = (content or "").strip()
@@ -137,7 +139,7 @@ def ensure_sample_conversations(db: Session, patient: User) -> None:
         if appt.doctor_name and appt.doctor_name not in doctors:
             doctors.append(appt.doctor_name)
     if not doctors:
-        doctors = ["Dr. Sarah Johnson"]
+        doctors = [DEFAULT_DOCTOR_NAME]
 
     samples = [
         (

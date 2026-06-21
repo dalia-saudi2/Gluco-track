@@ -15,6 +15,7 @@ import type { DoctorChatSummary } from '../../types/doctorChat';
 type Props = {
   D: DashboardPalette;
   patientId?: number;
+  fill?: boolean;
 };
 
 function formatChatDate(iso: string): string {
@@ -23,7 +24,7 @@ function formatChatDate(iso: string): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export function DoctorChatCard({ D, patientId }: Props) {
+export function DoctorChatCard({ D, patientId, fill = false }: Props) {
   const router = useRouter();
   const s = useMemo(() => createStyles(D), [D]);
   const [chats, setChats] = useState<DoctorChatSummary[]>([]);
@@ -53,19 +54,20 @@ export function DoctorChatCard({ D, patientId }: Props) {
   );
 
   return (
-    <View style={s.card}>
+    <View style={[s.card, fill && s.cardFill]}>
       <View style={s.head}>
         <MessageCircle size={16} color={D.secondary} />
         <Text style={s.title}>Doctor Messages</Text>
       </View>
       <Text style={s.subtitle}>Chat history with your care team</Text>
 
-      {loading ? (
-        <ActivityIndicator color={D.primary} style={s.loader} />
-      ) : chats.length === 0 ? (
-        <Text style={s.empty}>No doctor conversations yet.</Text>
-      ) : (
-        chats.map((chat) => (
+      <View style={fill ? s.bodyFill : undefined}>
+        {loading ? (
+          <ActivityIndicator color={D.primary} style={s.loader} />
+        ) : chats.length === 0 ? (
+          <Text style={s.empty}>No doctor conversations yet.</Text>
+        ) : (
+          chats.map((chat) => (
           <Pressable
             key={chat.id}
             style={({ pressed }) => [s.row, pressed && s.rowPressed]}
@@ -95,7 +97,8 @@ export function DoctorChatCard({ D, patientId }: Props) {
             <ChevronRight size={18} color={D.onSurfaceVariant} />
           </Pressable>
         ))
-      )}
+        )}
+      </View>
     </View>
   );
 }
@@ -108,6 +111,13 @@ function createStyles(D: DashboardPalette) {
       padding: 16,
       borderWidth: 1,
       borderColor: D.outlineVariant,
+    },
+    cardFill: {
+      flex: 1,
+      alignSelf: 'stretch',
+    },
+    bodyFill: {
+      flex: 1,
     },
     head: {
       flexDirection: 'row',
