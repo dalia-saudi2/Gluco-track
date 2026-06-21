@@ -17,7 +17,7 @@ export async function playHydrationReminderSound(): Promise<void> {
   try {
     await ensureAudioMode();
     const { sound } = await Audio.Sound.createAsync(
-      require('../assets/sounds/hydration-reminder.mp3'),
+      require('../assets/sounds/hydration_reminder.mp3'),
       { shouldPlay: true, volume: 1 }
     );
     sound.setOnPlaybackStatusUpdate((status) => {

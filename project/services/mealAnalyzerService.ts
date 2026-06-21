@@ -1,57 +1,10 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { z } from 'zod';
+import { generateText, Output, createGateway } from 'ai';
 import { API_KEYS } from '../config/api-keys';
-
-/**
- * Vision-capable models for generateContent. Aliases like `gemini-1.5-flash` often return 404 now.
- * Order: prefer lite first (often gentler quotas), then fuller Flash variants.
- * Set EXPO_PUBLIC_GEMINI_MEAL_MODEL to force a specific id first.
- */
-const GEMINI_MEAL_MODEL_FALLBACKS = [
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-] as const;
-
-function mealModelCandidates(): string[] {
-  const explicit = process.env.EXPO_PUBLIC_GEMINI_MEAL_MODEL?.trim();
-  if (explicit) {
-    return [
-      explicit,
-      ...GEMINI_MEAL_MODEL_FALLBACKS.filter((m) => m !== explicit),
-    ];
-  }
-  return [...GEMINI_MEAL_MODEL_FALLBACKS];
-}
-
-function shouldTryNextGeminiModel(errMsg: string): boolean {
-  return /\b404\b|not found|not supported for generateContent|\b429\b|quota|RESOURCE_EXHAUSTED|rate limit/i.test(
-    errMsg
-  );
-}
 
 export const SYSTEM_PROMPT = [
   'You are an expert clinical AI for diabetes meal analysis integrated into a patient portal.',
-  'You analyze meal photos and return structured JSON followed by a narrative explanation.',
-  '',
-  'RESPONSE FORMAT — always respond with valid JSON first inside <JSON> and </JSON> tags,',
-  'then a blank line, then a short narrative for the patient.',
-  '',
-  'JSON schema (strict):',
-  '{',
-  '  "foods": [',
-  '    { "name": "string", "portion": "e.g. 200g", "gi": "low|medium|high" }',
-  '  ],',
-  '  "nutrition": {',
-  '    "carbs": number,',
-  '    "calories": number,',
-  '    "protein": number,',
-  '    "fat": number',
-  '  },',
-  '  "glucose_delta": number,',
-  '  "risk": "low|medium|high",',
-  '  "risk_description": "one sentence explanation",',
-  '  "recommendations": ["string", "string", "string"]',
-  '}',
+  'You analyze meal photos and return a structured JSON response.',
   '',
   'Field rules:',
   '- foods: list every distinct food item visible in the image',
@@ -65,8 +18,7 @@ export const SYSTEM_PROMPT = [
   '- risk: low = peak under 140, medium = 140–180, high = above 180',
   '- risk_description: one plain-language sentence',
   '- recommendations: exactly 3 actionable personalized tips',
-  '',
-  'After </JSON> write 3–4 sentences of plain patient-friendly explanation. No jargon.',
+  '- narrative: 3–4 sentences of plain patient-friendly explanation. No jargon.',
 ].join('\n');
 
 export interface MealFoodItem {
@@ -90,6 +42,29 @@ export interface MealAnalysisParsed {
   risk_description: string;
   recommendations: string[];
 }
+
+export const mealFoodItemSchema = z.object({
+  name: z.string().describe('Name of the food item'),
+  portion: z.string().describe('Estimated portion size, e.g. 200g or 1 cup'),
+  gi: z.enum(['low', 'medium', 'high']).describe('Glycemic index category'),
+});
+
+export const mealNutritionSchema = z.object({
+  carbs: z.number().describe('Total carbohydrates in grams'),
+  calories: z.number().describe('Total calories in kcal'),
+  protein: z.number().describe('Total protein in grams'),
+  fat: z.number().describe('Total fat in grams'),
+});
+
+export const mealAnalysisSchema = z.object({
+  foods: z.array(mealFoodItemSchema).describe('List of food items identified in the image'),
+  nutrition: mealNutritionSchema.describe('Nutritional summary of the meal'),
+  glucose_delta: z.number().describe('Predicted blood glucose change over 2 hours in mg/dL (e.g. +30)'),
+  risk: z.enum(['low', 'medium', 'high']).describe('Glycemic risk level'),
+  risk_description: z.string().describe('A single-sentence explanation of glycemic risk'),
+  recommendations: z.array(z.string()).length(3).describe('Exactly 3 actionable, personalized tips for the patient'),
+  narrative: z.string().describe('3-4 sentences of plain, patient-friendly explanation. No jargon.'),
+});
 
 export function buildUserMessage(params: {
   currentGlucose: number;
@@ -133,10 +108,17 @@ export async function analyzeMeal(params: {
   mealTime: string;
   insulinUnits: number;
 }): Promise<{ parsed: MealAnalysisParsed; narrative: string }> {
-  const apiKey = API_KEYS.GEMINI_API_KEY?.trim();
+  // Polyfill structuredClone for Hermes (React Native JS engine doesn't support it)
+  if (typeof globalThis.structuredClone === 'undefined') {
+    (globalThis as any).structuredClone = function structuredClone<T>(obj: T): T {
+      return JSON.parse(JSON.stringify(obj));
+    };
+  }
+
+  const apiKey = API_KEYS.AI_GATEWAY_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(
-      'Missing Gemini API key. Set EXPO_PUBLIC_GEMINI_API_KEY in project/.env and restart Expo.'
+      'Missing Vercel AI Gateway API key. Set EXPO_PUBLIC_AI_GATEWAY_API_KEY in project/.env.local and restart.'
     );
   }
 
@@ -147,73 +129,48 @@ export async function analyzeMeal(params: {
     insulinUnits: params.insulinUnits,
   });
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const candidates = mealModelCandidates();
+  const gatewayInstance = createGateway({
+    apiKey,
+  });
 
-  let fullText: string | undefined;
-  let lastError: Error | null = null;
-
-  for (const modelId of candidates) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelId,
-        systemInstruction: SYSTEM_PROMPT,
-      });
-      const result = await model.generateContent({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: params.mediaType,
-                  data: normalizeBase64(params.imageBase64),
-                },
-              },
-              { text: userMessage },
-            ],
-          },
-        ],
-        generationConfig: {
-          maxOutputTokens: 1024,
-          temperature: 0.35,
-        },
-      });
-      fullText = result.response.text();
-      lastError = null;
-      break;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      lastError = new Error(msg || 'Gemini meal analysis failed.');
-      if (!shouldTryNextGeminiModel(msg)) {
-        throw lastError;
-      }
-    }
-  }
-
-  if (fullText === undefined) {
-    throw new Error(
-      `Gemini meal analysis failed after trying: ${candidates.join(', ')}. Last error: ${lastError?.message}`
-    );
-  }
-
-  if (!fullText || typeof fullText !== 'string') {
-    throw new Error('Unexpected response from Gemini.');
-  }
-
-  const jsonMatch = fullText.match(/<JSON>([\s\S]*?)<\/JSON>/);
-  if (!jsonMatch) {
-    throw new Error('Could not find JSON block in the AI response.');
-  }
-
-  let parsed: MealAnalysisParsed;
   try {
-    parsed = JSON.parse(jsonMatch[1].trim()) as MealAnalysisParsed;
-  } catch {
-    throw new Error('AI returned malformed JSON.');
+    const result = await generateText({
+      model: gatewayInstance('google/gemini-2.5-flash-lite'),
+      output: Output.object({ schema: mealAnalysisSchema }),
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              image: normalizeBase64(params.imageBase64),
+              mediaType: params.mediaType,
+            },
+            {
+              type: 'text',
+              text: userMessage,
+            },
+          ],
+        },
+      ],
+      temperature: 0.35,
+    });
+
+    const parsedData = result.output;
+    if (!parsedData) {
+      throw new Error('AI failed to return structured meal data.');
+    }
+
+    const { narrative, ...parsed } = parsedData;
+
+    return {
+      parsed: parsed as MealAnalysisParsed,
+      narrative: narrative || '',
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('Meal analysis error:', e);
+    throw new Error(`Meal analysis failed: ${msg}`);
   }
-
-  const narrative = fullText.replace(/<JSON>[\s\S]*?<\/JSON>/, '').trim();
-
-  return { parsed, narrative };
 }

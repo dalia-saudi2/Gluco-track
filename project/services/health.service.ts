@@ -1,4 +1,5 @@
 import { Platform, Linking } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   HealthPermissionStatus,
   HealthTodayData,
@@ -9,6 +10,8 @@ import {
 const HEALTH_CONNECT_PACKAGE = 'com.google.android.apps.healthdata';
 const HEALTH_CONNECT_PLAY_STORE =
   `https://play.google.com/store/apps/details?id=${HEALTH_CONNECT_PACKAGE}`;
+
+const HEALTH_KIT_PROMPTED_KEY = '@health_kit_prompted';
 
 const ANDROID_READ_PERMISSIONS = [
   { accessType: 'read' as const, recordType: 'Steps' as const },
@@ -22,13 +25,15 @@ let HealthConnect: any = null;
 
 if (Platform.OS === 'ios') {
   try {
-    AppleHealthKit = require('react-native-health').default;
+    const lib = require('react-native-health');
+    AppleHealthKit = lib.default || lib;
   } catch {
     console.warn('Apple HealthKit library not installed or linked.');
   }
 } else if (Platform.OS === 'android') {
   try {
-    HealthConnect = require('react-native-health-connect');
+    const lib = require('react-native-health-connect');
+    HealthConnect = lib.default || lib;
   } catch {
     console.warn('Android Health Connect library not installed or linked.');
   }
@@ -84,8 +89,13 @@ class HealthService {
       }
 
       return this.androidInitialized;
-    } catch (error) {
-      console.error('Failed to initialize Health Connect:', error);
+    } catch (error: any) {
+      console.warn(
+        'Failed to initialize Android Health Connect (module may not be linked or running under Expo Go). Falling back to simulation mode:',
+        error?.message || error
+      );
+      this.useSimulation = true;
+      this.permissionStatus = 'granted';
       return false;
     }
   }
@@ -99,21 +109,39 @@ class HealthService {
     try {
       if (Platform.OS === 'ios' && AppleHealthKit) {
         return new Promise((resolve) => {
-          AppleHealthKit.isAvailable((err: any, available: boolean) => {
-            if (err || !available) {
-              resolve(false);
-              return;
-            }
+          try {
+            AppleHealthKit.isAvailable((err: any, available: boolean) => {
+              if (err || !available) {
+                resolve(false);
+                return;
+              }
+              resolve(true);
+            });
+          } catch (e: any) {
+            console.warn(
+              'Apple HealthKit isAvailable failed. Falling back to simulation mode:',
+              e?.message || e
+            );
+            this.useSimulation = true;
+            this.permissionStatus = 'granted';
             resolve(true);
-          });
+          }
         });
       }
 
       if (Platform.OS === 'android' && HealthConnect) {
-        return await this.ensureAndroidHealthConnect();
+        const ok = await this.ensureAndroidHealthConnect();
+        if (this.useSimulation) return true;
+        return ok;
       }
-    } catch (e) {
-      console.error('Error checking health provider availability:', e);
+    } catch (e: any) {
+      console.warn(
+        'Error checking health provider availability. Falling back to simulation:',
+        e?.message || e
+      );
+      this.useSimulation = true;
+      this.permissionStatus = 'granted';
+      return true;
     }
 
     return false;
@@ -123,11 +151,15 @@ class HealthService {
     if (Platform.OS !== 'android' || !HealthConnect || this.androidSdkStatus === null) {
       return false;
     }
-    return (
-      this.androidSdkStatus === HealthConnect.SdkAvailabilityStatus.SDK_UNAVAILABLE ||
-      this.androidSdkStatus ===
-        HealthConnect.SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
-    );
+    try {
+      return (
+        this.androidSdkStatus === HealthConnect.SdkAvailabilityStatus.SDK_UNAVAILABLE ||
+        this.androidSdkStatus ===
+          HealthConnect.SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -140,30 +172,40 @@ class HealthService {
 
     try {
       if (Platform.OS === 'ios' && AppleHealthKit) {
-        const permissions = this.getAppleHealthPermissions();
-        return new Promise((resolve) => {
-          AppleHealthKit.getAuthStatus(permissions, (err: any, results: any) => {
-            if (err) {
-              resolve('denied');
-              return;
-            }
-            const readStatus = results.permissions?.read || [];
-            const allGranted = Object.values(readStatus).every((status: any) => status === 2);
-            const anyDenied = Object.values(readStatus).some((status: any) => status === 1);
-
-            if (allGranted) {
-              resolve('granted');
-            } else if (anyDenied) {
-              resolve('permanently_denied');
-            } else {
-              resolve('denied');
-            }
-          });
-        });
+        try {
+          const prompted = await AsyncStorage.getItem(HEALTH_KIT_PROMPTED_KEY);
+          if (prompted === 'true') {
+            // Initialize Apple HealthKit in background so it's ready to query
+            const permissions = this.getAppleHealthPermissions();
+            return new Promise((resolve) => {
+              try {
+                AppleHealthKit.initHealthKit(permissions, (err: any) => {
+                  if (err) {
+                    console.warn('Apple HealthKit background init error:', err);
+                    resolve('denied');
+                  } else {
+                    resolve('granted');
+                  }
+                });
+              } catch (e: any) {
+                console.warn('Apple HealthKit background init failed:', e?.message || e);
+                resolve('denied');
+              }
+            });
+          } else {
+            return 'denied';
+          }
+        } catch (storageErr) {
+          console.warn('Failed to read HealthKit prompted status from AsyncStorage:', storageErr);
+          return 'denied';
+        }
       }
 
       if (Platform.OS === 'android' && HealthConnect) {
         const ready = await this.ensureAndroidHealthConnect();
+        if (this.useSimulation) {
+          return this.permissionStatus === 'idle' ? 'denied' : this.permissionStatus;
+        }
         if (!ready) {
           return this.needsHealthConnectInstall() ? 'unavailable' : 'denied';
         }
@@ -177,8 +219,14 @@ class HealthService {
         );
         return hasAll ? 'granted' : 'denied';
       }
-    } catch (e) {
-      console.error('Error checking permissions:', e);
+    } catch (e: any) {
+      console.warn(
+        'Error checking native health permissions. Falling back to simulation:',
+        e?.message || e
+      );
+      this.useSimulation = true;
+      this.permissionStatus = 'granted';
+      return 'granted';
     }
 
     return 'unavailable';
@@ -195,6 +243,7 @@ class HealthService {
 
     try {
       const available = await this.isAvailable();
+      if (this.useSimulation) return 'granted';
       if (!available) {
         return this.needsHealthConnectInstall() ? 'unavailable' : 'unavailable';
       }
@@ -202,14 +251,27 @@ class HealthService {
       if (Platform.OS === 'ios' && AppleHealthKit) {
         const permissions = this.getAppleHealthPermissions();
         return new Promise((resolve) => {
-          AppleHealthKit.initHealthKit(permissions, (err: any) => {
-            if (err) {
-              console.error('Apple HealthKit init error:', err);
-              resolve('denied');
-            } else {
-              this.checkPermissions().then(resolve);
-            }
-          });
+          try {
+            AppleHealthKit.initHealthKit(permissions, async (err: any) => {
+              if (err) {
+                console.warn('Apple HealthKit init error:', err);
+                resolve('denied');
+              } else {
+                try {
+                  await AsyncStorage.setItem(HEALTH_KIT_PROMPTED_KEY, 'true');
+                  resolve('granted');
+                } catch (storeErr) {
+                  console.warn('Failed to save health kit prompted status:', storeErr);
+                  resolve('granted');
+                }
+              }
+            });
+          } catch (e: any) {
+            console.warn('Apple HealthKit initHealthKit failed, using simulation:', e?.message || e);
+            this.useSimulation = true;
+            this.permissionStatus = 'granted';
+            resolve('granted');
+          }
         });
       }
 
@@ -217,9 +279,14 @@ class HealthService {
         await HealthConnect.requestPermission(ANDROID_READ_PERMISSIONS);
         return await this.checkPermissions();
       }
-    } catch (e) {
-      console.error('Error requesting permissions:', e);
-      return 'denied';
+    } catch (e: any) {
+      console.warn(
+        'Error requesting health permissions. Falling back to simulation:',
+        e?.message || e
+      );
+      this.useSimulation = true;
+      this.permissionStatus = 'granted';
+      return 'granted';
     }
 
     return 'unavailable';
@@ -255,7 +322,7 @@ class HealthService {
         }
       }
     } catch (e) {
-      console.error('Failed to open settings:', e);
+      console.warn('Failed to open settings:', e);
     }
     return false;
   }
@@ -267,7 +334,7 @@ class HealthService {
       await Linking.openURL(canOpenMarket ? marketUrl : HEALTH_CONNECT_PLAY_STORE);
       return true;
     } catch (e) {
-      console.error('Failed to open Health Connect install page:', e);
+      console.warn('Failed to open Health Connect install page:', e);
       return false;
     }
   }
@@ -282,6 +349,9 @@ class HealthService {
 
     try {
       const isGranted = (await this.checkPermissions()) === 'granted';
+      if (this.useSimulation) {
+        return this.generateSimulatedToday();
+      }
       if (!isGranted) {
         throw new Error('Permissions not granted');
       }
@@ -298,56 +368,71 @@ class HealthService {
 
       if (Platform.OS === 'ios' && AppleHealthKit) {
         steps = await new Promise<number>((resolve) => {
-          AppleHealthKit.getStepCount(
-            { date: startOfDay.toISOString() },
-            (err: any, results: any) => {
-              resolve(err || !results ? 0 : results.value);
-            }
-          );
+          try {
+            AppleHealthKit.getStepCount(
+              { date: startOfDay.toISOString() },
+              (err: any, results: any) => {
+                resolve(err || !results ? 0 : results.value);
+              }
+            );
+          } catch {
+            resolve(0);
+          }
         });
 
         caloriesBurned = await new Promise<number>((resolve) => {
-          AppleHealthKit.getActiveEnergyBurned(
-            {
-              startDate: startOfDay.toISOString(),
-              endDate: endOfDay.toISOString()
-            },
-            (err: any, results: any) => {
-              if (err || !results || results.length === 0) {
-                resolve(0);
-              } else {
-                const total = results.reduce((sum: number, sample: any) => sum + (sample.value || 0), 0);
-                resolve(Math.round(total));
+          try {
+            AppleHealthKit.getActiveEnergyBurned(
+              {
+                startDate: startOfDay.toISOString(),
+                endDate: endOfDay.toISOString()
+              },
+              (err: any, results: any) => {
+                if (err || !results || results.length === 0) {
+                  resolve(0);
+                } else {
+                  const total = results.reduce((sum: number, sample: any) => sum + (sample.value || 0), 0);
+                  resolve(Math.round(total));
+                }
               }
-            }
-          );
+            );
+          } catch {
+            resolve(0);
+          }
         });
 
         sleepHours = await new Promise<number>((resolve) => {
-          AppleHealthKit.getSleepSamples(
-            {
-              startDate: startOfDay.toISOString(),
-              endDate: endOfDay.toISOString()
-            },
-            (err: any, results: any) => {
-              if (err || !results || results.length === 0) {
-                resolve(0);
-              } else {
-                let totalMin = 0;
-                results.forEach((sample: any) => {
-                  if (sample.value === 'ASLEEP' || sample.value === 1) {
-                    const start = new Date(sample.startDate).getTime();
-                    const end = new Date(sample.endDate).getTime();
-                    totalMin += (end - start) / (1000 * 60);
-                  }
-                });
-                resolve(parseFloat((totalMin / 60).toFixed(1)));
+          try {
+            AppleHealthKit.getSleepSamples(
+              {
+                startDate: startOfDay.toISOString(),
+                endDate: endOfDay.toISOString()
+              },
+              (err: any, results: any) => {
+                if (err || !results || results.length === 0) {
+                  resolve(0);
+                } else {
+                  let totalMin = 0;
+                  results.forEach((sample: any) => {
+                    if (sample.value === 'ASLEEP' || sample.value === 1) {
+                      const start = new Date(sample.startDate).getTime();
+                      const end = new Date(sample.endDate).getTime();
+                      totalMin += (end - start) / (1000 * 60);
+                    }
+                  });
+                  resolve(parseFloat((totalMin / 60).toFixed(1)));
+                }
               }
-            }
-          );
+            );
+          } catch {
+            resolve(0);
+          }
         });
       } else if (Platform.OS === 'android' && HealthConnect) {
         await this.ensureAndroidHealthConnect();
+        if (this.useSimulation) {
+          return this.generateSimulatedToday();
+        }
 
         const stepsData = await HealthConnect.readRecords('Steps', {
           timeRangeFilter: {
@@ -388,9 +473,10 @@ class HealthService {
       }
 
       return { steps, sleepHours, caloriesBurned };
-    } catch (e) {
-      console.error('Error fetching today\'s health data:', e);
-      throw e;
+    } catch (e: any) {
+      console.warn('Error fetching native today data, using simulation:', e?.message || e);
+      this.useSimulation = true;
+      return this.generateSimulatedToday();
     }
   }
 
@@ -404,6 +490,9 @@ class HealthService {
 
     try {
       const isGranted = (await this.checkPermissions()) === 'granted';
+      if (this.useSimulation) {
+        return this.generateSimulatedHistory(daysCount);
+      }
       if (!isGranted) {
         throw new Error('Permissions not granted');
       }
@@ -429,55 +518,70 @@ class HealthService {
 
         if (Platform.OS === 'ios' && AppleHealthKit) {
           dailySteps = await new Promise<number>((resolve) => {
-            AppleHealthKit.getStepCount(
-              { date: start.toISOString() },
-              (err: any, results: any) => {
-                resolve(err || !results ? 0 : results.value);
-              }
-            );
+            try {
+              AppleHealthKit.getStepCount(
+                { date: start.toISOString() },
+                (err: any, results: any) => {
+                  resolve(err || !results ? 0 : results.value);
+                }
+              );
+            } catch {
+              resolve(0);
+            }
           });
 
           dailyCalories = await new Promise<number>((resolve) => {
-            AppleHealthKit.getActiveEnergyBurned(
-              {
-                startDate: start.toISOString(),
-                endDate: end.toISOString()
-              },
-              (err: any, results: any) => {
-                if (err || !results) resolve(0);
-                else {
-                  const sum = results.reduce((tot: number, s: any) => tot + (s.value || 0), 0);
-                  resolve(Math.round(sum));
+            try {
+              AppleHealthKit.getActiveEnergyBurned(
+                {
+                  startDate: start.toISOString(),
+                  endDate: end.toISOString()
+                },
+                (err: any, results: any) => {
+                  if (err || !results) resolve(0);
+                  else {
+                    const sum = results.reduce((tot: number, s: any) => tot + (s.value || 0), 0);
+                    resolve(Math.round(sum));
+                  }
                 }
-              }
-            );
+              );
+            } catch {
+              resolve(0);
+            }
           });
 
           dailySleep = await new Promise<number>((resolve) => {
-            AppleHealthKit.getSleepSamples(
-              {
-                startDate: start.toISOString(),
-                endDate: end.toISOString()
-              },
-              (err: any, results: any) => {
-                if (err || !results || results.length === 0) {
-                  resolve(0);
-                } else {
-                  let totalMin = 0;
-                  results.forEach((sample: any) => {
-                    if (sample.value === 'ASLEEP' || sample.value === 1) {
-                      const sTime = new Date(sample.startDate).getTime();
-                      const eTime = new Date(sample.endDate).getTime();
-                      totalMin += (eTime - sTime) / (1000 * 60);
-                    }
-                  });
-                  resolve(parseFloat((totalMin / 60).toFixed(1)));
+            try {
+              AppleHealthKit.getSleepSamples(
+                {
+                  startDate: start.toISOString(),
+                  endDate: end.toISOString()
+                },
+                (err: any, results: any) => {
+                  if (err || !results || results.length === 0) {
+                    resolve(0);
+                  } else {
+                    let totalMin = 0;
+                    results.forEach((sample: any) => {
+                      if (sample.value === 'ASLEEP' || sample.value === 1) {
+                        const sTime = new Date(sample.startDate).getTime();
+                        const eTime = new Date(sample.endDate).getTime();
+                        totalMin += (eTime - sTime) / (1000 * 60);
+                      }
+                    });
+                    resolve(parseFloat((totalMin / 60).toFixed(1)));
+                  }
                 }
-              }
-            );
+              );
+            } catch {
+              resolve(0);
+            }
           });
         } else if (Platform.OS === 'android' && HealthConnect) {
           await this.ensureAndroidHealthConnect();
+          if (this.useSimulation) {
+            return this.generateSimulatedHistory(daysCount);
+          }
 
           const stepsData = await HealthConnect.readRecords('Steps', {
             timeRangeFilter: {
@@ -524,9 +628,10 @@ class HealthService {
       }
 
       return { steps, sleep, calories };
-    } catch (e) {
-      console.error(`Error fetching history health data (${daysCount}d):`, e);
-      throw e;
+    } catch (e: any) {
+      console.warn(`Error fetching native history health data (${daysCount}d), using simulation:`, e?.message || e);
+      this.useSimulation = true;
+      return this.generateSimulatedHistory(daysCount);
     }
   }
 

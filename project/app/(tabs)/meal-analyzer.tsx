@@ -109,6 +109,9 @@ export default function MealAnalyzerScreen() {
   const [photoInsight, setPhotoInsight] = useState<{
     carbsEstimateG: number;
     narrativePreview?: string;
+    foods?: Array<{ name: string; portion: string; gi: string }>;
+    nutrition?: { carbs: number; calories: number; protein: number; fat: number };
+    recommendations?: string[];
   } | null>(null);
   const skipDerivedCarbsSync = useRef(false);
 
@@ -227,7 +230,7 @@ export default function MealAnalyzerScreen() {
       }
       setError(null);
     } catch (e: unknown) {
-      console.error(e);
+      console.warn(e);
       Alert.alert('Error', 'Failed to open photo library.');
     }
   };
@@ -287,9 +290,28 @@ export default function MealAnalyzerScreen() {
 
       skipDerivedCarbsSync.current = true;
       setCarbsInput(carbs.toFixed(1));
+
+      if (vision.parsed?.foods?.length) {
+        const newCart: CartLine[] = vision.parsed.foods.map((food, idx) => {
+          const matchedGrams = food.portion.match(/(\d+(?:\.\d+)?)\s*(?:g|gram)/i);
+          const grams = matchedGrams ? matchedGrams[1] : '100';
+          return {
+            key: `ai-${idx}-${Date.now()}`,
+            fdc_id: -1,
+            description: `${food.name} (${food.portion})`,
+            grams: grams,
+            carbs_per_100g: null,
+          };
+        });
+        setCart(newCart);
+      }
+
       setPhotoInsight({
         carbsEstimateG: carbs,
-        narrativePreview: vision.narrative?.slice(0, 420),
+        narrativePreview: vision.narrative,
+        foods: vision.parsed?.foods,
+        nutrition: vision.parsed?.nutrition,
+        recommendations: vision.parsed?.recommendations,
       });
 
       const usdaRef = derivedCarbs > 0 ? derivedCarbs : undefined;

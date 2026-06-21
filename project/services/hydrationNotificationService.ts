@@ -5,7 +5,7 @@ import {
   hydrationReminderService,
 } from './hydrationReminderService';
 
-export const HYDRATION_SOUND = 'hydration-reminder.mp3';
+export const HYDRATION_SOUND = 'hydration_reminder.mp3';
 export const HYDRATION_CHANNEL_ID = 'hydration-reminders';
 
 /** Schedule this many 2-hour reminders ahead (48 hours). */

@@ -183,7 +183,7 @@ class HealthSyncService {
       }
       return result;
     } catch (error) {
-      console.error('Health sync failed, queueing for retry:', error);
+      console.warn('Health sync failed, queueing for retry:', error);
       await this.queuePending(records);
       throw error;
     }

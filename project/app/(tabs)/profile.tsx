@@ -94,13 +94,13 @@ export default function ProfileScreen() {
 
   const profileData = user
     ? {
-        name: user.full_name || mockProfileData.name,
-        email: user.email || mockProfileData.email,
-        phone: user.phone || mockProfileData.phone,
-        dateOfBirth: formatDate(user.date_of_birth),
-        bloodType: user.blood_type || mockProfileData.bloodType,
-        emergencyContact: user.emergency_contact || mockProfileData.emergencyContact,
-      }
+      name: user.full_name || mockProfileData.name,
+      email: user.email || mockProfileData.email,
+      phone: user.phone || mockProfileData.phone,
+      dateOfBirth: formatDate(user.date_of_birth),
+      bloodType: user.blood_type || mockProfileData.bloodType,
+      emergencyContact: user.emergency_contact || mockProfileData.emergencyContact,
+    }
     : mockProfileData;
 
   const initials = (user?.full_name || 'Patient')

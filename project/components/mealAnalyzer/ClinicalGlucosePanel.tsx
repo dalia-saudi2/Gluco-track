@@ -20,7 +20,13 @@ export default function ClinicalGlucosePanel({
   error: string | null;
   prediction: MealGlucosePredictResponse | null;
   usdaCarbsDerived: number | null;
-  photoInsight?: { carbsEstimateG: number; narrativePreview?: string } | null;
+  photoInsight?: {
+    carbsEstimateG: number;
+    narrativePreview?: string;
+    foods?: Array<{ name: string; portion: string; gi: string }>;
+    nutrition?: { carbs: number; calories: number; protein: number; fat: number };
+    recommendations?: string[];
+  } | null;
 }) {
   const D = useD();
   const styles = useDashboardStyles(createStyles);
@@ -83,8 +89,53 @@ export default function ClinicalGlucosePanel({
         <CandyCard style={styles.card} accent="tertiary">
           <Text style={styles.sectionTitle}>From meal photo (AI)</Text>
           <Text style={styles.row}>Estimated carbs: {photoInsight.carbsEstimateG.toFixed(1)} g</Text>
+
+          {photoInsight.foods && photoInsight.foods.length > 0 ? (
+            <View style={styles.foodsList}>
+              {photoInsight.foods.map((food, i) => (
+                <View key={i} style={styles.foodTag}>
+                  <Text style={styles.foodTagText}>
+                    {food.name} ({food.portion}) • GI: {food.gi}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {photoInsight.nutrition ? (
+            <View style={styles.macrosRow}>
+              <View style={styles.macroCol}>
+                <Text style={styles.macroVal}>{photoInsight.nutrition.calories}</Text>
+                <Text style={styles.macroLbl}>kcal</Text>
+              </View>
+              <View style={styles.macroCol}>
+                <Text style={styles.macroVal}>{photoInsight.nutrition.carbs}g</Text>
+                <Text style={styles.macroLbl}>carbs</Text>
+              </View>
+              <View style={styles.macroCol}>
+                <Text style={styles.macroVal}>{photoInsight.nutrition.protein}g</Text>
+                <Text style={styles.macroLbl}>protein</Text>
+              </View>
+              <View style={styles.macroCol}>
+                <Text style={styles.macroVal}>{photoInsight.nutrition.fat}g</Text>
+                <Text style={styles.macroLbl}>fat</Text>
+              </View>
+            </View>
+          ) : null}
+
           {photoInsight.narrativePreview ? (
             <Text style={styles.rowMuted}>{photoInsight.narrativePreview}</Text>
+          ) : null}
+
+          {photoInsight.recommendations && photoInsight.recommendations.length > 0 ? (
+            <View style={styles.tipsBox}>
+              <Text style={styles.tipsTitle}>Personalized Tips:</Text>
+              {photoInsight.recommendations.map((rec, i) => (
+                <Text key={i} style={styles.tipRow}>
+                  • {rec}
+                </Text>
+              ))}
+            </View>
           ) : null}
         </CandyCard>
       ) : null}
@@ -186,5 +237,15 @@ function createStyles(D: DashboardPalette) {
     rowMuted: { fontFamily: DF.medium, fontSize: 13, color: D.onSurfaceVariant, marginTop: 4 },
     flag: { fontFamily: DF.medium, fontSize: 13, color: D.orange, marginTop: 6 },
     disclaimer: { fontFamily: DF.medium, fontSize: 11, color: D.onSurfaceVariant, lineHeight: 16 },
+    foodsList: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: 10, marginBottom: 10 },
+    foodTag: { backgroundColor: D.surfaceContainerHigh, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+    foodTagText: { fontFamily: DF.medium, fontSize: 12, color: D.onSurface },
+    macrosRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, backgroundColor: D.surfaceContainerLow, borderRadius: 14, padding: 12, marginTop: 10, marginBottom: 10 },
+    macroCol: { alignItems: 'center' as const, flex: 1 },
+    macroVal: { fontFamily: DF.bold, fontSize: 16, color: D.onSurface },
+    macroLbl: { fontFamily: DF.medium, fontSize: 10, color: D.onSurfaceVariant, textTransform: 'uppercase' as const, marginTop: 2 },
+    tipsBox: { marginTop: 10, borderTopWidth: 1, borderTopColor: D.borderSubtle, paddingTop: 10 },
+    tipsTitle: { fontFamily: DF.bold, fontSize: 13, color: D.onSurface, marginBottom: 4 },
+    tipRow: { fontFamily: DF.medium, fontSize: 13, color: D.onSurfaceVariant, lineHeight: 18, marginTop: 4 },
   };
 }

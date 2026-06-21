@@ -45,18 +45,25 @@ export function HealthErrorState({
                   : 'Health Connect requires the native Android app. Build and install the app on your phone, then grant permissions.'
                 : 'Apple Health (iOS) or Health Connect (Android) is not supported or not enabled on this device.'}
             </Text>
-            {Platform.OS === 'android' && onInstallHealthConnect && (
-              <Pressable style={styles.primaryBtn} onPress={onInstallHealthConnect}>
-                <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />
-                <Text style={styles.primaryBtnText}>Install Health Connect</Text>
-              </Pressable>
-            )}
-            {onEnableSimulation && Platform.OS === 'web' && (
-              <Pressable style={styles.primaryBtn} onPress={onEnableSimulation}>
-                <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />
-                <Text style={styles.primaryBtnText}>Enable Demo/Simulation Mode</Text>
-              </Pressable>
-            )}
+            <View style={[styles.btnRow, { flexDirection: 'column', gap: 10, width: '100%', marginTop: 8 }]}>
+              {Platform.OS === 'android' && onInstallHealthConnect && (
+                <Pressable style={styles.primaryBtn} onPress={onInstallHealthConnect}>
+                  <Heart size={16} color={D.onPrimary} style={styles.btnIcon} />
+                  <Text style={styles.primaryBtnText}>Install Health Connect</Text>
+                </Pressable>
+              )}
+              {onEnableSimulation && (
+                <Pressable
+                  style={Platform.OS === 'android' && onInstallHealthConnect ? styles.secondaryBtn : styles.primaryBtn}
+                  onPress={onEnableSimulation}
+                >
+                  <Heart size={16} color={Platform.OS === 'android' && onInstallHealthConnect ? D.onSurfaceVariant : D.onPrimary} style={styles.btnIcon} />
+                  <Text style={Platform.OS === 'android' && onInstallHealthConnect ? styles.secondaryBtnText : styles.primaryBtnText}>
+                    Use Simulation Mode
+                  </Text>
+                </Pressable>
+              )}
+            </View>
           </View>
         );
 

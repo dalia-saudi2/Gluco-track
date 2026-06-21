@@ -181,7 +181,7 @@ export default function ChatbotScreen() {
           setIsInitializing(true);
           await chatbotService.getOrCreateSession();
         } catch (error) {
-          console.error('Failed to initialize chat session:', error);
+          console.warn('Failed to initialize chat session:', error);
         } finally {
           setIsInitializing(false);
         }
@@ -341,7 +341,7 @@ export default function ChatbotScreen() {
         errorCount: 0
       }));
     } catch (err) {
-      console.error('[Chat] groqChat generation failed:', err);
+      console.warn('[Chat] groqChat generation failed:', err);
       setIsTyping(false);
 
       // Remove the partially generated bot message if it was created

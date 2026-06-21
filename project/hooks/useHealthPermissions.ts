@@ -26,7 +26,7 @@ export function useHealthPermissions() {
       setStatus(currentStatus);
       return currentStatus;
     } catch (error) {
-      console.error('Error checking health permissions:', error);
+      console.warn('Error checking health permissions:', error);
       setStatus('unavailable');
       return 'unavailable';
     } finally {
@@ -41,7 +41,7 @@ export function useHealthPermissions() {
       setStatus(finalStatus);
       return finalStatus;
     } catch (error) {
-      console.error('Error requesting health permissions:', error);
+      console.warn('Error requesting health permissions:', error);
       setStatus('denied');
       return 'denied';
     } finally {

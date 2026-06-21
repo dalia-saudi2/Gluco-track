@@ -38,21 +38,9 @@ def _load_model():
 
 
 def _load_real_bundle():
-    global _REAL_BUNDLE
-    if _REAL_BUNDLE is not None:
-        return _REAL_BUNDLE
-    if joblib is None or not _REAL_BUNDLE_PATH.exists():
-        _REAL_BUNDLE = None
-        return None
-    try:
-        bundle = joblib.load(_REAL_BUNDLE_PATH)
-        if isinstance(bundle, dict) and "model" in bundle and "columns" in bundle:
-            _REAL_BUNDLE = bundle
-        else:
-            _REAL_BUNDLE = None
-    except Exception:
-        _REAL_BUNDLE = None
-    return _REAL_BUNDLE
+    # Bypassed: Real-patient bundle features are pre-scaled, leading to scaling mismatches
+    # with unscaled runtime values. We fall back to the compact runtime model which is trained on raw values.
+    return None
 
 
 def build_feature_row(

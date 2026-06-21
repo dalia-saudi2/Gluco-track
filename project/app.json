@@ -67,12 +67,21 @@
       [
         "expo-notifications",
         {
-          "sounds": ["./assets/sounds/hydration-reminder.mp3"]
+          "sounds": [
+            "./assets/sounds/hydration_reminder.mp3"
+          ]
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a6382b52-6fe7-4405-ad5a-cf2043c6208e"
+      }
     }
   }
 }

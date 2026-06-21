@@ -110,7 +110,7 @@ export default function DashboardScreen() {
         labResults: labResults.length ? labResults : undefined,
       });
     } catch (e) {
-      console.error('Dashboard load error:', e);
+      console.warn('Dashboard load error:', e);
     } finally {
       setLoading(false);
     }

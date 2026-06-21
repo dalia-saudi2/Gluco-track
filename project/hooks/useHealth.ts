@@ -117,7 +117,7 @@ export function useHealth(permissionStatus: HealthPermissionStatus, options: Opt
           setLastSyncedAt(stored);
         }
       } catch (e: unknown) {
-        console.error('Error fetching health data in hook:', e);
+        console.warn('Error fetching health data in hook:', e);
         setError(e instanceof Error ? e.message : 'Failed to fetch health data from your device.');
       } finally {
         setLoading(false);
